@@ -20,7 +20,10 @@
 # Exclude local-only files
 /AGENTS.md
 /docs/proposals/
+/third_party/sdk/
 /third_party/df-ffi/target/
+/build-sdk.log
+/dist/
 !.clang-format
 !.gersemirc
 !.gitignore
