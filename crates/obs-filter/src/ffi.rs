@@ -84,6 +84,7 @@ pub struct ObsSourceInfo {
 }
 
 #[cfg(not(test))]
+#[cfg_attr(target_os = "windows", link(name = "obs", kind = "raw-dylib"))]
 unsafe extern "C" {
     pub fn obs_register_source_s(info: *const ObsSourceInfo, size: usize);
 }

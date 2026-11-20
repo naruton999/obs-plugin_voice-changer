@@ -1,10 +1,11 @@
 //! OBS audio filter boundary.
 //!
-//! The plugin is currently macOS-only. It is a `cdylib` loaded by OBS; libobs
-//! symbols are resolved at load time with `-undefined dynamic_lookup`.
+//! The plugin is a `cdylib` loaded by OBS. On macOS, libobs symbols are
+//! resolved at load time with `-undefined dynamic_lookup`. On Windows, the FFI
+//! block links against `obs.dll` with `raw-dylib`.
 
-#[cfg(not(target_os = "macos"))]
-compile_error!("obs-filter is currently implemented for macOS only");
+#[cfg(all(not(any(target_os = "macos", target_os = "windows")), not(test)))]
+compile_error!("obs-filter supports macOS and Windows only");
 
 mod ffi;
 #[cfg(not(test))]
