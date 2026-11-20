@@ -12,6 +12,7 @@ mod ffi;
 mod filter;
 #[cfg(not(test))]
 mod module;
+mod params;
 
 #[cfg(not(test))]
 pub(crate) fn guard<R>(default: R, f: impl FnOnce() -> R) -> R {

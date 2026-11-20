@@ -5,6 +5,9 @@ version = 4
 [[package]]
 name = "obs-filter"
 version = "0.1.0"
+dependencies = [
+ "vc-core",
+]
 
 [[package]]
 name = "vc-core"

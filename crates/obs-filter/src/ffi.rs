@@ -13,6 +13,14 @@ pub enum ObsData {}
 pub enum ObsSource {}
 pub enum ObsProperties {}
 
+/// `struct obs_audio_info` from `libobs/obs.h`.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ObsAudioInfo {
+    pub samples_per_sec: u32,
+    pub speakers: c_int,
+}
+
 /// `struct obs_audio_data` from `libobs/obs.h`.
 #[repr(C)]
 pub struct ObsAudioData {
@@ -87,6 +95,7 @@ pub struct ObsSourceInfo {
 #[cfg_attr(target_os = "windows", link(name = "obs", kind = "raw-dylib"))]
 unsafe extern "C" {
     pub fn obs_register_source_s(info: *const ObsSourceInfo, size: usize);
+    pub fn obs_get_audio_info(oai: *mut ObsAudioInfo) -> bool;
 }
 
 #[cfg(test)]
@@ -125,5 +134,12 @@ mod tests {
         assert_eq!(offset_of!(ObsAudioData, data), 0);
         assert_eq!(offset_of!(ObsAudioData, frames), 64);
         assert_eq!(offset_of!(ObsAudioData, timestamp), 72);
+    }
+
+    #[test]
+    fn audio_info_layout_matches_obs_31_1_1() {
+        assert_eq!(size_of::<ObsAudioInfo>(), 8);
+        assert_eq!(offset_of!(ObsAudioInfo, samples_per_sec), 0);
+        assert_eq!(offset_of!(ObsAudioInfo, speakers), 4);
     }
 }

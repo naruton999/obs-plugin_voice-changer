@@ -8,3 +8,6 @@ description = "OBS audio filter binding"
 
 [lib]
 crate-type = ["cdylib"]
+
+[dependencies]
+vc-core = { path = "../vc-core" }
