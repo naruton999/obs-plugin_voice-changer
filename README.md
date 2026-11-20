@@ -9,7 +9,7 @@ v0.1.0 開発中。
 | 部分 | 状態 |
 |---|---|
 | `vc-core` | DSP チェーン骨格（ゲイン／HPF／ソフトクリップ／バイパス） |
-| `obs-filter` | macOS arm64 / Windows x64 向けの**素通しフィルタ** |
+| `obs-filter` | macOS arm64 / Windows x64。`vc-core` を接続済み（既定パラメータ） |
 | ピッチ／フォルマント | 未実装（枠のみ） |
 | UI・プリセット読込 | 未実装 |
 
@@ -39,7 +39,11 @@ cargo fmt --check
 | フィルタ ID | `obs_plugin_voice_changer_filter` |
 | 表示名 | ボイスチェンジャー |
 | 対象 OBS | 32.2.1 以上（ビルドは OBS 31.1.1 API） |
-| 音声処理 | 現時点では素通し |
+| 音声処理 | `vc-core` を接続済み（既定パラメータ） |
+
+`filter_audio` は `vc-core` のチェーン
+（入力ゲイン → HPF → ゲート → ピッチ → フォルマント → 出力ゲイン → ソフトクリップ）を呼ぶ。
+ピッチ／フォルマント／ゲートはまだ no-op のため、既定パラメータでは聴感上ほぼ素通しになる。
 
 libobs はビルド時にリンクしない。macOS は OBS がプラグインをロードするときにシンボルを解決し、
 Windows は `raw-dylib` で `obs.dll` にリンクする。
