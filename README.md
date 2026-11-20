@@ -9,7 +9,7 @@ v0.1.0 開発中。
 | 部分 | 状態 |
 |---|---|
 | `vc-core` | DSP チェーン骨格（ゲイン／HPF／ソフトクリップ／バイパス） |
-| `obs-filter` | macOS arm64 向けの**素通しフィルタ** |
+| `obs-filter` | macOS arm64 / Windows x64 向けの**素通しフィルタ** |
 | ピッチ／フォルマント | 未実装（枠のみ） |
 | UI・プリセット読込 | 未実装 |
 
@@ -30,15 +30,30 @@ cargo clippy --all-targets -- -D warnings
 cargo fmt --check
 ```
 
-## OBS プラグイン（macOS / 素通し）
+## OBS プラグイン（素通し）
 
-### ビルド
+### 共通仕様
+
+| 項目 | 値 |
+|---|---|
+| フィルタ ID | `obs_plugin_voice_changer_filter` |
+| 表示名 | ボイスチェンジャー |
+| 対象 OBS | 32.2.1 以上（ビルドは OBS 31.1.1 API） |
+| 音声処理 | 現時点では素通し |
+
+libobs はビルド時にリンクしない。macOS は OBS がプラグインをロードするときにシンボルを解決し、
+Windows は `raw-dylib` で `obs.dll` にリンクする。
+そのため、ビルド時に OBS のフレームワークや SDK ライブラリは不要。
+
+### macOS（arm64）
+
+#### ビルド
 
 ```bash
 cargo build -p obs-filter --release
 ```
 
-### パッケージ
+#### パッケージ
 
 ```bash
 ./build-aux/package-macos.sh
@@ -46,23 +61,51 @@ cargo build -p obs-filter --release
 
 `dist/obs-plugin_voice_changer.plugin` が生成される（ad-hoc 署名済み）。
 
-### 配置
+#### 配置
 
 `dist/obs-plugin_voice_changer.plugin` を
 `~/Library/Application Support/obs-studio/plugins/` にコピーし、OBS を再起動する。
 
-### 仕様
+### Windows（x64）
 
-| 項目 | 値 |
+#### ビルド・パッケージ
+
+```powershell
+cargo build -p obs-filter --release --target x86_64-pc-windows-msvc
+./build-aux/package-windows.ps1 -Configuration Release -SkipBuild
+```
+
+`-SkipBuild` を省略すると、スクリプトがビルドから実行する。
+
+`dist/obs-plugin_voice-changer-windows-x64.zip` が生成される。
+
+#### 配置（OBS 33 以降の新配置）
+
+1. zip を展開する。
+2. `obs-plugin_voice-changer` フォルダを `C:\ProgramData\obs-studio\plugins\` にコピーする。
+3. OBS を再起動する。
+
+```
+C:\ProgramData\obs-studio\plugins\obs-plugin_voice-changer\
+├─ obs-plugin_voice-changer.dll
+└─ data\presets\sharp-female.toml
+```
+
+`OBS_PLUGINS_PATH` を設定している場合は、そのフォルダ配下に置いてもよい。
+
+#### 配置（OBS 32.x / 旧配置）
+
+| 種類 | コピー先 |
 |---|---|
-| フィルタ ID | `obs_plugin_voice_changer_filter` |
-| 表示名 | ボイスチェンジャー |
-| 対象 OBS | 32.2.1 以上（ビルドは OBS 31.1.1 API） |
-| 対象 OS | macOS arm64 |
-| 音声処理 | 現時点では素通し |
+| DLL | `C:\Program Files\obs-studio\obs-plugins\64bit\` |
+| data | `C:\Program Files\obs-studio\data\obs-plugins\obs-plugin_voice-changer\` |
 
-libobs はビルド時にリンクせず、OBS がプラグインをロードするときにシンボルを解決する。
-そのため、ビルド時に OBS のフレームワークや SDK ライブラリは不要。
+管理者権限が必要。アンインストールはコピーしたファイルとフォルダの削除のみ。
+
+#### 注意
+
+- 署名なしのため、SmartScreen の警告が出る場合がある。zip のプロパティで「ブロックの解除」を行う。
+- CI は GitHub Actions の手動実行（`Windows Build`）で、artifact から zip を取得する。
 
 ## ライセンス
 
