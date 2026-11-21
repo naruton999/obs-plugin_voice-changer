@@ -4,6 +4,7 @@ const PITCH_WINDOW_SECONDS: f64 = 0.040;
 const PITCH_SEARCH_SECONDS: f64 = 0.010;
 const PITCH_CORRELATION_SECONDS: f64 = 0.005;
 const FORMANT_LATENCY: usize = 1024;
+const PHASE_VOCODER_LATENCY: usize = 2048;
 
 /// Estimates the processing latency for the given parameters.
 ///
@@ -27,7 +28,13 @@ pub fn estimated_latency_samples(sample_rate: f32, params: &Params) -> usize {
         .round()
         .max(1.0);
 
-    let pitch = if params.pitch_semitones == 0.0 {
+    let pitch = if params.phase_vocoder {
+        if params.pitch_semitones == 0.0 {
+            0
+        } else {
+            PHASE_VOCODER_LATENCY
+        }
+    } else if params.pitch_semitones == 0.0 {
         hop
     } else {
         let ratio = 2f64.powf(params.pitch_semitones as f64 / 12.0);

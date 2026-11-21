@@ -7,6 +7,7 @@ use crate::stages::gain::GainStage;
 use crate::stages::gate::GateStage;
 use crate::stages::hpf::HighPassStage;
 use crate::stages::pitch::PitchStage;
+use crate::stages::pv_pitch::PhaseVocoderPitch;
 use crate::stages::soft_clip::SoftClipStage;
 use crate::stages::tone::ToneStage;
 
@@ -27,6 +28,8 @@ pub struct VoiceChanger {
     hpf: HighPassStage,
     gate: GateStage,
     pitch: PitchStage,
+    pv_pitch: PhaseVocoderPitch,
+    phase_vocoder: bool,
     formant: FormantStage,
     tone: ToneStage,
     compressor: CompressorStage,
@@ -66,6 +69,8 @@ impl VoiceChanger {
             hpf: HighPassStage::new(sample_rate, param_ramp),
             gate: GateStage::new(sample_rate),
             pitch: PitchStage::new(sample_rate, max_block_size),
+            pv_pitch: PhaseVocoderPitch::new(sample_rate, max_block_size),
+            phase_vocoder: false,
             formant: FormantStage::new(sample_rate, max_block_size),
             tone: ToneStage::new(sample_rate),
             compressor: CompressorStage::new(sample_rate),
@@ -110,7 +115,12 @@ impl VoiceChanger {
     /// Current processing latency in samples (pitch and formant stages).
     #[must_use]
     pub fn latency_samples(&self) -> usize {
-        self.pitch.latency_samples() + self.formant.latency_samples()
+        let pitch = if self.phase_vocoder {
+            self.pv_pitch.latency_samples()
+        } else {
+            self.pitch.latency_samples()
+        };
+        pitch + self.formant.latency_samples()
     }
 
     /// Number of blocks zeroed because of NaN/Inf.
@@ -152,6 +162,12 @@ impl VoiceChanger {
             params.gate_hold_ms,
         );
         self.pitch.set_semitones(params.pitch_semitones);
+        self.pv_pitch.set_semitones(params.pitch_semitones);
+        if params.phase_vocoder != self.phase_vocoder {
+            self.phase_vocoder = params.phase_vocoder;
+            self.pitch.reset();
+            self.pv_pitch.reset();
+        }
         // The pitch stage shifts formants along with pitch. The formant stage
         // receives the difference between the desired total formant shift and
         // the pitch-induced shift.
@@ -207,7 +223,11 @@ impl VoiceChanger {
         self.input_gain.process(buf);
         self.hpf.process(buf);
         self.gate.process(buf);
-        self.pitch.process(buf);
+        if self.phase_vocoder {
+            self.pv_pitch.process(buf);
+        } else {
+            self.pitch.process(buf);
+        }
         self.formant.process(buf);
         self.tone.process(buf);
         self.compressor.process(buf);
@@ -237,6 +257,7 @@ impl VoiceChanger {
         self.hpf.reset();
         self.gate.reset();
         self.pitch.reset();
+        self.pv_pitch.reset();
         self.formant.reset();
         self.tone.reset();
         self.compressor.reset();

@@ -15,6 +15,7 @@ pub(crate) struct Preset {
     pub gate_hold_ms: f32,
 
     pub pitch_semitones: f32,
+    pub phase_vocoder: bool,
 
     pub formant_enabled: bool,
     pub formant_semitones: f32,
@@ -45,6 +46,7 @@ impl Default for Preset {
             gate_release_ms: 120.0,
             gate_hold_ms: 40.0,
             pitch_semitones: 0.0,
+            phase_vocoder: false,
             formant_enabled: true,
             formant_semitones: 0.0,
             output_gain_db: 0.0,
@@ -114,6 +116,9 @@ pub(crate) fn parse(text: &str) -> Result<Preset, String> {
             "pitch" if key == "semitones" => {
                 preset.pitch_semitones = parse_f32(value)?;
             }
+            "pitch" if key == "phase_vocoder" => {
+                preset.phase_vocoder = value == "true";
+            }
             "formant" => match key {
                 "enabled" => preset.formant_enabled = value == "true",
                 "semitones" => preset.formant_semitones = parse_f32(value)?,
@@ -165,6 +170,7 @@ mod tests {
         assert_eq!(preset.hpf_hz, 80.0);
         assert!(!preset.gate_enabled);
         assert_eq!(preset.pitch_semitones, 3.5);
+        assert!(!preset.phase_vocoder);
         assert!(preset.formant_enabled);
         assert_eq!(preset.formant_semitones, 2.5);
         assert_eq!(preset.tone_low_db, -1.0);
@@ -179,6 +185,7 @@ mod tests {
         assert_eq!(preset.input_gain_db, 0.0);
         assert_eq!(preset.hpf_hz, 100.0);
         assert_eq!(preset.pitch_semitones, 12.0);
+        assert!(!preset.phase_vocoder);
         assert!(preset.formant_enabled);
         assert_eq!(preset.formant_semitones, 4.4);
         assert_eq!(preset.tone_low_db, -3.0);

@@ -78,6 +78,11 @@ pub(crate) unsafe extern "C" fn get_defaults(settings: *mut ObsData) {
             );
             ffi::obs_data_set_default_bool(
                 settings,
+                c"phase_vocoder".as_ptr(),
+                defaults.phase_vocoder,
+            );
+            ffi::obs_data_set_default_bool(
+                settings,
                 c"formant_enabled".as_ptr(),
                 defaults.formant_enabled,
             );
@@ -254,6 +259,11 @@ pub(crate) unsafe extern "C" fn get_properties(data: *mut c_void) -> *mut ObsPro
             if !pitch.is_null() {
                 ffi::obs_property_float_set_suffix(pitch, c" 半音".as_ptr());
             }
+            ffi::obs_properties_add_bool(
+                props,
+                c"phase_vocoder".as_ptr(),
+                c"フェーズボコーダ（実験的）".as_ptr(),
+            );
 
             let formant = ffi::obs_properties_add_float_slider(
                 props,
@@ -587,6 +597,7 @@ unsafe extern "C" fn apply_preset(
                 c"pitch_semitones".as_ptr(),
                 preset.pitch_semitones as f64,
             );
+            ffi::obs_data_set_bool(settings, c"phase_vocoder".as_ptr(), preset.phase_vocoder);
             ffi::obs_data_set_bool(
                 settings,
                 c"formant_enabled".as_ptr(),
@@ -778,6 +789,7 @@ unsafe fn read_params(settings: *mut ObsData) -> Params {
 
         pitch_semitones: unsafe { ffi::obs_data_get_double(settings, c"pitch_semitones".as_ptr()) }
             as f32,
+        phase_vocoder: unsafe { ffi::obs_data_get_bool(settings, c"phase_vocoder".as_ptr()) },
 
         formant_enabled: unsafe { ffi::obs_data_get_bool(settings, c"formant_enabled".as_ptr()) },
         formant_independent: unsafe {

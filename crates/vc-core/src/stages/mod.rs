@@ -4,6 +4,7 @@ pub(crate) mod gain;
 pub(crate) mod gate;
 pub(crate) mod hpf;
 pub(crate) mod pitch;
+pub(crate) mod pv_pitch;
 pub(crate) mod soft_clip;
 pub(crate) mod tone;
 

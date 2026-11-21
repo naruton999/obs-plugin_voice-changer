@@ -15,6 +15,7 @@ pub struct Params {
     pub gate_hold_ms: f32,
 
     pub pitch_semitones: f32,
+    pub phase_vocoder: bool,
 
     pub formant_enabled: bool,
     pub formant_independent: bool,
@@ -49,6 +50,7 @@ impl Default for Params {
             gate_release_ms: 120.0,
             gate_hold_ms: 40.0,
             pitch_semitones: 0.0,
+            phase_vocoder: false,
             formant_enabled: true,
             formant_independent: false,
             formant_semitones: 0.0,
@@ -98,6 +100,7 @@ impl Params {
                 -12.0,
                 12.0,
             ),
+            phase_vocoder: self.phase_vocoder,
             formant_enabled: self.formant_enabled,
             formant_independent: self.formant_independent,
             formant_semitones: clamp(
