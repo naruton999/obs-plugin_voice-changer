@@ -14,7 +14,7 @@ const LOG_INFO: c_int = 300;
 
 /// Presets compiled into the plugin so the list is never empty, even when the
 /// data folder or preset files are missing.
-const BUILTIN_PRESETS: [(&str, &str); 2] = [
+const BUILTIN_PRESETS: [(&str, &str); 4] = [
     (
         "sharp-female",
         include_str!("../../../presets/sharp-female.toml"),
@@ -22,6 +22,14 @@ const BUILTIN_PRESETS: [(&str, &str); 2] = [
     (
         "migrated-female",
         include_str!("../../../presets/migrated-female.toml"),
+    ),
+    (
+        "natural-female",
+        include_str!("../../../presets/natural-female.toml"),
+    ),
+    (
+        "bright-female",
+        include_str!("../../../presets/bright-female.toml"),
     ),
 ];
 
@@ -603,7 +611,11 @@ unsafe extern "C" fn apply_preset(
                 c"formant_enabled".as_ptr(),
                 preset.formant_enabled,
             );
-            ffi::obs_data_set_bool(settings, c"formant_independent".as_ptr(), true);
+            ffi::obs_data_set_bool(
+                settings,
+                c"formant_independent".as_ptr(),
+                preset.formant_independent,
+            );
             ffi::obs_data_set_double(
                 settings,
                 c"formant_semitones".as_ptr(),

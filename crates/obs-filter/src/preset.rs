@@ -18,6 +18,9 @@ pub(crate) struct Preset {
     pub phase_vocoder: bool,
 
     pub formant_enabled: bool,
+    /// When false, formants follow the pitch shift instead of using
+    /// `formant_semitones`.
+    pub formant_independent: bool,
     pub formant_semitones: f32,
 
     pub output_gain_db: f32,
@@ -48,6 +51,7 @@ impl Default for Preset {
             pitch_semitones: 0.0,
             phase_vocoder: false,
             formant_enabled: true,
+            formant_independent: true,
             formant_semitones: 0.0,
             output_gain_db: 0.0,
             tone_low_db: 0.0,
@@ -121,6 +125,7 @@ pub(crate) fn parse(text: &str) -> Result<Preset, String> {
             }
             "formant" => match key {
                 "enabled" => preset.formant_enabled = value == "true",
+                "independent" => preset.formant_independent = value == "true",
                 "semitones" => preset.formant_semitones = parse_f32(value)?,
                 _ => {}
             },
@@ -172,6 +177,7 @@ mod tests {
         assert_eq!(preset.pitch_semitones, 3.5);
         assert!(!preset.phase_vocoder);
         assert!(preset.formant_enabled);
+        assert!(preset.formant_independent);
         assert_eq!(preset.formant_semitones, 2.5);
         assert_eq!(preset.tone_low_db, -1.0);
         assert_eq!(preset.tone_mid_db, 2.5);
@@ -187,6 +193,7 @@ mod tests {
         assert_eq!(preset.pitch_semitones, 12.0);
         assert!(!preset.phase_vocoder);
         assert!(preset.formant_enabled);
+        assert!(preset.formant_independent);
         assert_eq!(preset.formant_semitones, 4.4);
         assert_eq!(preset.tone_low_db, -3.0);
         assert_eq!(preset.tone_mid_db, 2.0);
@@ -198,6 +205,21 @@ mod tests {
         assert_eq!(preset.compressor_release_ms, 150.0);
         assert_eq!(preset.compressor_makeup_db, 2.0);
         assert_eq!(preset.output_gain_db, 2.0);
+    }
+
+    #[test]
+    fn parses_formant_independent_false() {
+        let text = r#"
+schema_version = 1
+[pitch]
+semitones = 12.0
+[formant]
+independent = false
+semitones = 4.4
+"#;
+        let preset = parse(text).unwrap();
+        assert!(!preset.formant_independent);
+        assert_eq!(preset.formant_semitones, 4.4);
     }
 
     #[test]

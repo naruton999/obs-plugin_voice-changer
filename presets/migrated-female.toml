@@ -21,6 +21,7 @@ phase_vocoder = false
 
 [formant]
 enabled = true
+independent = true
 semitones = 4.4
 
 [tone]
