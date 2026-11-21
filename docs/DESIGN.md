@@ -86,7 +86,7 @@ OBS 音声スレッド
 │  ├─ vc-core/                 # DSP 本体（FFI なし・テスト可能）
 │  └─ obs-filter/              # libobs バインディング + filter_audio（cdylib）
 ├─ presets/
-│  └─ sharp-female.toml
+│  └─ standard-female.toml
 ├─ data/obs-plugins/<module>/
 │  ├─ presets/
 │  └─ locale/
@@ -116,7 +116,7 @@ OBS 固有の都合（ブロック長・チャンネル配置）を持ち込ま�
 | 形式 | planar f32（`obs_audio_data.data[ch]`） |
 | フレーム数 | 可変（64〜2048 を想定。固定前提にしない） |
 | チャンネル | 1ch / 2ch |
-| 2ch の扱い | L と R が同一なら 1 回処理して複製。異なる場合はチャンネルごとに処理 |
+| 2ch の扱い | 同一またはニアモノラル（相関 0.98 以上）は Mid を 1 回処理して左右へ複製。大きく異なる場合のみチャンネルごとに処理 |
 | サンプルレート | 48kHz 既定、44.1kHz も対応。処理は ms 基準 |
 | タイムスタンプ | `obs_audio_data.timestamp` は変更しない |
 
@@ -151,7 +151,7 @@ Cargo の cdylib 出力名はアンダースコア区切りになるため、パ
 ### 4.1 処理チェーン
 
 ```
-in ─► InputGain ─► HPF ─► Gate(既定 OFF) ─► Pitch(PV 既定 / WSOLA)
+in ─► InputGain ─► HPF ─► Gate(既定 OFF) ─► Pitch(WSOLA 既定 / PV 任意)
    ─► Formant(任意) ─► OutGain ─► SoftClip ─► out
 ```
 
@@ -173,6 +173,7 @@ in ─► InputGain ─► HPF ─► Gate(既定 OFF) ─► Pitch(PV 既定 / 
 | | Release | 50〜500 ms | 120 ms |
 | | Hold | 0〜200 ms | 40 ms |
 | Pitch | シフト量 | -12〜+12 半音（0.1 刻み） | 0 半音 |
+| | 方式 | WSOLA / 位相ロック PV | WSOLA |
 | Formant | 有効/無効 | on/off | ON |
 | | 独立制御 | on/off | OFF（ピッチに連動） |
 | | シフト量 | -12〜+12 半音（0.1 刻み） | ピッチと同じ |
@@ -181,9 +182,9 @@ in ─► InputGain ─► HPF ─► Gate(既定 OFF) ─► Pitch(PV 既定 / 
 
 ### 4.3 Pitch（位相ロック付きフェーズボコーダ / WSOLA）
 
-既定は位相ロック付きフェーズボコーダ（FFT 2048 点 / hop 512 / 同一 STFT 内で
-フォルマント包絡も伸縮 / トランジェントで位相リセット）。低遅延が必要な場合に
-WSOLA へ切り替えられる。下表は WSOLA の値。
+既定は WSOLA（時間伸縮＋リサンプル、正規化相関、Catmull-Rom 補間）。
+高品質が必要な場合は位相ロック付きフェーズボコーダ（FFT 2048 点 / hop 512 /
+トランジェントで位相リセット）へ切り替えられる。下表は WSOLA の値。
 
 | 項目 | 値 |
 |---|---|
@@ -228,12 +229,12 @@ WSOLA へ切り替えられる。下表は WSOLA の値。
 | ＋OBS の音声ブロック | 約 21ms |
 | **合計の目安（フォルマント込み）** | **約 82〜85ms** |
 
-品質優先の既定値。低遅延が必要な場合はフォルマントを OFF にする（約 61〜64ms）。
+品質優先の既定値。低遅延が必要な場合はフォルマントを OFF にする（約 40〜43ms）。
 
 - OBS の「音声同期オフセット」で補正する前提とし、**推奨値をプロパティに表示**する。
 - フィルタの有効/無効で遅延が変わるため、**遅延維持バイパス**を用意する。
   - 処理は回したまま、乾音を出力する。
-- 70ms を超える構成は既定にしない。
+- 既定は品質優先でフォルマント込み約 85ms（OBS 込み）。低遅延用途ではフォルマント OFF を推奨する。
 
 ---
 
@@ -241,19 +242,20 @@ WSOLA へ切り替えられる。下表は WSOLA の値。
 
 ```
 ┌ ボイスチェンジャー ──────────────────────────┐
-│ プリセット      [ sharp-female        ▼ ]     │
+│ プリセット      [ standard-female     ▼ ]     │
 │                          [プリセットを適用]   │
 │ ─────────────────────────────────────────── │
 │ ☑ フォルマント独立制御                        │
-│    ピッチ      [────●────] +3.5 半音          │
-│    フォルマント [───●─────] +2.5 半音          │
+│    ピッチ      [────────●] +12.0 半音         │
+│    フォルマント [──●─────] +4.4 半音          │
 │ ─────────────────────────────────────────── │
-│ 入力ゲイン [──●──] 0.0 dB   HPF [──●──] 80 Hz │
+│ 入力ゲイン [──●──] 0.0 dB   HPF [──●──] 100 Hz│
 │ ☐ ゲート  Threshold [-45.0] dB                │
-│ 出力ゲイン [──●──] 0.0 dB                     │
+│ 出力ゲイン [──●──] +2.0 dB                    │
 │ ─────────────────────────────────────────── │
+│ ☐ 高品質モード（フェーズボコーダ）            │
 │ ☐ 遅延維持バイパス                            │
-│ 概算遅延 約 41ms      v0.1.0                  │
+│ 概算遅延 約 61ms      v0.1.0                  │
 └──────────────────────────────────────────────┘
 ```
 
@@ -265,7 +267,8 @@ WSOLA へ切り替えられる。下表は WSOLA の値。
 | 概算遅延 | ラベル | フォルマント ON/OFF で変わる |
 | バージョン | ラベル | 不具合報告用 |
 
-図は `sharp-female` 適用時の例。フォルマント処理の有効/無効は既定 ON、独立制御は既定 OFF。
+図は推奨プリセット `standard-female` 適用時の例。フォルマント処理の有効/無効は既定 ON、
+独立制御は既定 OFF、高品質モード（PV）は既定 OFF（WSOLA）。
 
 - 数値は必ず単位付き。
 - 変更は即時反映（`update`）。
@@ -278,7 +281,7 @@ WSOLA へ切り替えられる。下表は WSOLA の値。
 | 項目 | 仕様 |
 |---|---|
 | 形式 | TOML |
-| 同梱 | `sharp-female.toml` を 1 個 |
+| 同梱 | `standard-female.toml`（推奨）ほか |
 | 配置 | `data/obs-plugins/<module>/presets/*.toml`（`obs_module_file` で解決） |
 | 読込 | プラグイン読込時と `update` 時（メインスレッド） |
 | 未知フィールド | 無視（前方互換） |
@@ -289,13 +292,13 @@ WSOLA へ切り替えられる。下表は WSOLA の値。
 
 ```toml
 schema_version = 1
-name = "sharp-female"
-description = "HitPaw VoicePea クラシック / シャープな女性 の近似"
-created = "2026-11-11"
+name = "standard-female"
+description = "検証済みの標準女性声（ピッチ +12 / フォルマント +4.4 / トーン EQ / コンプ）"
+created = "2026-11-21"
 
 [input]
 gain_db = 0.0
-hpf_hz = 80.0
+hpf_hz = 100.0
 
 [gate]
 enabled = false
@@ -306,20 +309,35 @@ release_ms = 120.0
 hold_ms = 40.0
 
 [pitch]
-semitones = 3.5
+semitones = 12.0
+phase_vocoder = false
 
 [formant]
 enabled = true
-semitones = 2.5
+independent = true
+semitones = 4.4
+
+[tone]
+low_db = -3.0
+mid_db = 2.0
+high_db = 6.0
+
+[compressor]
+enabled = true
+threshold_db = -18.0
+ratio = 3.0
+attack_ms = 8.0
+release_ms = 150.0
+makeup_db = 2.0
 
 [output]
-gain_db = 0.0
+gain_db = 2.0
 
 # 本プラグインでは適用しない（OBS 標準フィルタ用の参考値）
 [reference]
-low_shelf = { freq = 180.0, gain_db = -1.0 }
-peak = { freq = 3000.0, q = 1.0, gain_db = 2.5 }
-high_shelf = { freq = 7000.0, gain_db = 4.0 }
+low_shelf = { freq = 250.0, gain_db = -3.0 }
+peak = { freq = 2500.0, q = 1.0, gain_db = 2.0 }
+high_shelf = { freq = 5000.0, gain_db = 6.0 }
 lowpass_hz = 16000.0
 comp = { threshold_db = -18.0, ratio = 3.0, attack_ms = 8.0, release_ms = 150.0, makeup_db = 2.0 }
 ```
@@ -349,7 +367,7 @@ comp = { threshold_db = -18.0, ratio = 3.0, attack_ms = 8.0, release_ms = 150.0,
 Windows:
   obs-plugins/64bit/obs-plugin_voice-changer.dll
   data/obs-plugins/obs-plugin_voice-changer/
-    presets/sharp-female.toml
+    presets/standard-female.toml
     locale/en-US.ini
     locale/ja-JP.ini
 
@@ -358,7 +376,7 @@ macOS:
     Contents/MacOS/obs-plugin_voice-changer
     Contents/Info.plist
   data/obs-plugins/obs-plugin_voice-changer/
-    presets/sharp-female.toml
+    presets/standard-female.toml
     locale/en-US.ini
     locale/ja-JP.ini
 ```
