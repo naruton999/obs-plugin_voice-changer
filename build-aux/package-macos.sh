@@ -30,7 +30,7 @@ LIB="$ROOT/target/$TARGET_DIR/libobs_filter.dylib"
 rm -rf "$OUT"
 mkdir -p "$OUT/Contents/MacOS" "$OUT/Contents/Resources/presets"
 cp "$LIB" "$OUT/Contents/MacOS/obs-plugin_voice-changer"
-cp "$ROOT/presets/sharp-female.toml" "$OUT/Contents/Resources/presets/sharp-female.toml"
+cp "$ROOT"/presets/*.toml "$OUT/Contents/Resources/presets/"
 
 cat > "$OUT/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>

@@ -43,7 +43,7 @@ if (Test-Path $StageRoot) {
 New-Item -ItemType Directory -Force -Path (Join-Path $StageDir 'data/presets') | Out-Null
 
 Copy-Item $Dll (Join-Path $StageDir "$ModuleName.dll")
-Copy-Item (Join-Path $Root 'presets/sharp-female.toml') (Join-Path $StageDir 'data/presets/sharp-female.toml')
+Copy-Item (Join-Path $Root "presets/*.toml") (Join-Path $StageDir "data/presets/")
 
 # Never append to or nest an existing archive; replace it.
 if (Test-Path $ZipPath) {
