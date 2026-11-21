@@ -32,30 +32,33 @@ fn run() -> Result<(), String> {
     let wav = read_wav(input_path)?;
     let params = params_from_args(&args);
 
-    let mut planes = vec![vec![0.0f32; wav.frames]; wav.channels as usize];
-    for (channel, plane) in planes.iter_mut().enumerate() {
-        for (frame, value) in plane.iter_mut().enumerate() {
-            *value = wav.samples[frame * wav.channels as usize + channel];
+    // A voice changer must not shift the left and right channels with
+    // independent grain lattices: summing two different pitch phases sounds
+    // like two or three voices. The plugin links near-identical channels, and
+    // this renderer does the same by processing the mid signal only.
+    let channels = wav.channels as usize;
+    let mut mono = vec![0.0f32; wav.frames];
+    for (frame, value) in mono.iter_mut().enumerate() {
+        let mut sum = 0.0;
+        for channel in 0..channels {
+            sum += wav.samples[frame * channels + channel];
         }
+        *value = sum / channels as f32;
     }
 
-    let mut chains: Vec<VoiceChanger> = (0..wav.channels)
-        .map(|_| VoiceChanger::new(wav.sample_rate as f32, BLOCK))
-        .collect();
-    for (chain, plane) in chains.iter_mut().zip(planes.iter_mut()) {
-        chain.set_params(params);
-        chain.process(plane);
-    }
+    let mut chain = VoiceChanger::new(wav.sample_rate as f32, BLOCK);
+    chain.set_params(params);
+    chain.process(&mut mono);
 
     let mut interleaved = vec![0.0f32; wav.samples.len()];
-    for (channel, plane) in planes.iter().enumerate() {
-        for (frame, value) in plane.iter().enumerate() {
-            interleaved[frame * wav.channels as usize + channel] = *value;
+    for (frame, value) in mono.iter().enumerate() {
+        for channel in 0..channels {
+            interleaved[frame * channels + channel] = *value;
         }
     }
     write_f32_wav(output_path, wav.sample_rate, wav.channels, &interleaved)?;
 
-    let latency_ms = chains[0].latency_samples() as f32 * 1000.0 / wav.sample_rate as f32;
+    let latency_ms = chain.latency_samples() as f32 * 1000.0 / wav.sample_rate as f32;
     println!(
         "{}: {} Hz, {} ch, {} frames -> {} (latency {:.1} ms)",
         input_path, wav.sample_rate, wav.channels, wav.frames, output_path, latency_ms

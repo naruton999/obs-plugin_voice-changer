@@ -20,6 +20,10 @@ const DEFAULT_SAMPLE_RATE: f32 = 48_000.0;
 enum Layout {
     Mono,
     StereoEqual,
+    /// The channels are near-identical (a mono source duplicated by OBS).
+    /// Process the mid signal once so the two channels keep the same pitch
+    /// phase; independent grain lattices would sound like two or three voices.
+    StereoLinked,
     StereoDifferent,
 }
 
@@ -31,6 +35,8 @@ pub(crate) struct FilterData {
     pub(crate) sample_rate: f32,
     pub(crate) presets: Vec<PresetEntry>,
     pub(crate) latency: AtomicU64,
+    /// Mid-signal scratch buffer for linked stereo. Allocated in `create`.
+    scratch: Vec<f32>,
 }
 
 pub(crate) fn source_info() -> ObsSourceInfo {
@@ -69,6 +75,7 @@ unsafe extern "C" fn create(_settings: *mut ObsData, source: *mut ObsSource) -> 
             sample_rate,
             presets: Vec::new(),
             latency: AtomicU64::new(latency as u64),
+            scratch: vec![0.0; MAX_BLOCK_FRAMES],
         }))
         .cast::<c_void>()
     })
@@ -103,6 +110,25 @@ unsafe extern "C" fn filter_audio(
 
 fn estimated_latency(sample_rate: f32, params: &Params) -> usize {
     vc_core::estimated_latency_samples(sample_rate, params)
+}
+
+/// Returns true when the two channels carry almost the same signal. OBS often
+/// duplicates a mono microphone into both planes with tiny differences; those
+/// must be processed together or the two pitch-shifted copies beat against
+/// each other.
+fn linked_channels(left: &[f32], right: &[f32]) -> bool {
+    let mut dot = 0.0f64;
+    let mut left_energy = 0.0f64;
+    let mut right_energy = 0.0f64;
+    for (&l, &r) in left.iter().zip(right) {
+        dot += l as f64 * r as f64;
+        left_energy += l as f64 * l as f64;
+        right_energy += r as f64 * r as f64;
+    }
+    if left_energy < 1e-12 || right_energy < 1e-12 {
+        return true;
+    }
+    dot / (left_energy.sqrt() * right_energy.sqrt()) > 0.98
 }
 
 fn audio_sample_rate() -> f32 {
@@ -151,18 +177,18 @@ fn process(filter: &mut FilterData, audio: &mut ObsAudioData) {
 
     let left = planes[0];
     let right = planes[1];
-    let equal = if left == right {
-        true
+    let layout = if left == right {
+        Layout::StereoEqual
     } else {
         let left_slice = unsafe { slice::from_raw_parts(left, frames) };
         let right_slice = unsafe { slice::from_raw_parts(right, frames) };
-        left_slice == right_slice
-    };
-
-    let layout = if equal {
-        Layout::StereoEqual
-    } else {
-        Layout::StereoDifferent
+        if left_slice == right_slice {
+            Layout::StereoEqual
+        } else if linked_channels(left_slice, right_slice) {
+            Layout::StereoLinked
+        } else {
+            Layout::StereoDifferent
+        }
     };
 
     if layout != filter.last_layout {
@@ -177,6 +203,24 @@ fn process(filter: &mut FilterData, audio: &mut ObsAudioData) {
             filter.chains[0].process(buf);
             if left != right {
                 unsafe { ptr::copy(left, right, frames) };
+            }
+        }
+        Layout::StereoLinked => {
+            let left_buf = unsafe { slice::from_raw_parts_mut(left, frames) };
+            let right_buf = unsafe { slice::from_raw_parts_mut(right, frames) };
+            let (chains, scratch) = (&mut filter.chains, &mut filter.scratch);
+            let mut offset = 0;
+            while offset < frames {
+                let len = (frames - offset).min(scratch.len());
+                for i in 0..len {
+                    scratch[i] = 0.5 * (left_buf[offset + i] + right_buf[offset + i]);
+                }
+                chains[0].process(&mut scratch[..len]);
+                for i in 0..len {
+                    left_buf[offset + i] = scratch[i];
+                    right_buf[offset + i] = scratch[i];
+                }
+                offset += len;
             }
         }
         Layout::StereoDifferent => {
