@@ -31,6 +31,7 @@ pub struct VoiceChanger {
     pv_pitch: PhaseVocoderPitch,
     phase_vocoder: bool,
     formant: FormantStage,
+    formant_active: bool,
     tone: ToneStage,
     compressor: CompressorStage,
     output_gain: GainStage,
@@ -72,6 +73,7 @@ impl VoiceChanger {
             pv_pitch: PhaseVocoderPitch::new(sample_rate, max_block_size),
             phase_vocoder: false,
             formant: FormantStage::new(sample_rate, max_block_size),
+            formant_active: false,
             tone: ToneStage::new(sample_rate),
             compressor: CompressorStage::new(sample_rate),
             output_gain: GainStage::new(param_ramp),
@@ -112,15 +114,22 @@ impl VoiceChanger {
         self.max_block_size
     }
 
-    /// Current processing latency in samples (pitch and formant stages).
+    /// Current processing latency in samples.
+    ///
+    /// The phase vocoder moves pitch and formants in one STFT, so the separate
+    /// formant stage is bypassed and its latency is not added.
     #[must_use]
     pub fn latency_samples(&self) -> usize {
-        let pitch = if self.phase_vocoder {
-            self.pv_pitch.latency_samples()
+        let formant = if self.formant_active {
+            self.formant.latency_samples()
         } else {
-            self.pitch.latency_samples()
+            0
         };
-        pitch + self.formant.latency_samples()
+        if self.phase_vocoder {
+            self.pv_pitch.latency_samples() + formant
+        } else {
+            self.pitch.latency_samples() + formant
+        }
     }
 
     /// Number of blocks zeroed because of NaN/Inf.
@@ -162,21 +171,31 @@ impl VoiceChanger {
             params.gate_hold_ms,
         );
         self.pitch.set_semitones(params.pitch_semitones);
-        self.pv_pitch.set_semitones(params.pitch_semitones);
-        if params.phase_vocoder != self.phase_vocoder {
-            self.phase_vocoder = params.phase_vocoder;
-            self.pitch.reset();
-            self.pv_pitch.reset();
-        }
         // The pitch stage shifts formants along with pitch. The formant stage
-        // receives the difference between the desired total formant shift and
-        // the pitch-induced shift.
+        // (or the phase vocoder's integrated envelope warp) receives the
+        // difference between the desired total formant shift and the
+        // pitch-induced shift.
         let formant_target = if params.formant_independent {
-            params.formant_semitones.clamp(-7.0, 7.0)
+            params.formant_semitones.clamp(-12.0, 12.0)
         } else {
             params.pitch_semitones
         };
         let formant_stage = formant_target - params.pitch_semitones;
+        // The phase vocoder is used for pitch only; the dedicated formant
+        // stage handles the envelope. This keeps the formant shift accurate
+        // and lets the stage be skipped entirely when it would be neutral.
+        self.pv_pitch.set_params(params.pitch_semitones, 0.0, false);
+        if params.phase_vocoder != self.phase_vocoder {
+            self.phase_vocoder = params.phase_vocoder;
+            self.pitch.reset();
+            self.pv_pitch.reset();
+            self.formant.reset();
+        }
+        let formant_active = params.formant_enabled && formant_stage.abs() > 1e-6;
+        if formant_active != self.formant_active {
+            self.formant_active = formant_active;
+            self.formant.reset();
+        }
         self.formant
             .set_params(params.formant_enabled, formant_stage);
         self.tone
@@ -228,7 +247,9 @@ impl VoiceChanger {
         } else {
             self.pitch.process(buf);
         }
-        self.formant.process(buf);
+        if self.formant_active {
+            self.formant.process(buf);
+        }
         self.tone.process(buf);
         self.compressor.process(buf);
         self.output_gain.process(buf);

@@ -14,8 +14,8 @@ const SMOOTHING_SECONDS: f64 = 0.050;
 /// semitones, but the stage may need to cancel a large pitch-induced shift.
 const MAX_SHIFT_SEMITONES: f32 = 36.0;
 /// Clamp the spectral gain to avoid boosting near-silent bins excessively.
-const GAIN_MIN: f32 = 0.25;
-const GAIN_MAX: f32 = 4.0;
+const GAIN_MIN: f32 = 0.063;
+const GAIN_MAX: f32 = 16.0;
 /// Per-frame smoothing of the envelope gain (about 15 ms at 48 kHz).
 const GAIN_SMOOTHING: f32 = 0.35;
 /// Slow level matching (about 1 s at 48 kHz). The previous per-frame AGC

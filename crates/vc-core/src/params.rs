@@ -50,7 +50,7 @@ impl Default for Params {
             gate_release_ms: 120.0,
             gate_hold_ms: 40.0,
             pitch_semitones: 0.0,
-            phase_vocoder: false,
+            phase_vocoder: true,
             formant_enabled: true,
             formant_independent: false,
             formant_semitones: 0.0,
@@ -171,6 +171,7 @@ mod tests {
         assert_eq!(p.gate_release_ms, 120.0);
         assert_eq!(p.gate_hold_ms, 40.0);
         assert_eq!(p.pitch_semitones, 0.0);
+        assert!(p.phase_vocoder);
         assert!(p.formant_enabled);
         assert!(!p.formant_independent);
         assert!(!p.bypass);

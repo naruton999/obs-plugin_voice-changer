@@ -67,7 +67,7 @@ fn params_from_args(args: &[String]) -> Params {
     let formant_independent = !args.iter().any(|arg| arg == "--formant-follow");
     Params {
         pitch_semitones: value(args, "--pitch", 0.0),
-        phase_vocoder: args.iter().any(|arg| arg == "--phase-vocoder"),
+        phase_vocoder: !args.iter().any(|arg| arg == "--wsola"),
         formant_enabled: !args.iter().any(|arg| arg == "--formant-off"),
         formant_independent,
         formant_semitones: value(args, "--formant", 0.0),

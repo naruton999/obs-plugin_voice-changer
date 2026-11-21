@@ -28,28 +28,36 @@ pub fn estimated_latency_samples(sample_rate: f32, params: &Params) -> usize {
         .round()
         .max(1.0);
 
-    let pitch = if params.phase_vocoder {
-        if params.pitch_semitones == 0.0 {
-            0
-        } else {
-            PHASE_VOCODER_LATENCY
-        }
-    } else if params.pitch_semitones == 0.0 {
-        hop
+    let formant_target = if params.formant_independent {
+        params.formant_semitones.clamp(-12.0, 12.0)
     } else {
-        let ratio = 2f64.powf(params.pitch_semitones as f64 / 12.0);
-        let chunk = (4.0 * ratio - 3.0) * hop as f64 + search;
-        let search_need = search + correlation * ratio;
-        chunk.max(search_need).max(0.0).ceil() as usize + 2
+        params.pitch_semitones
     };
-
-    let formant = if params.formant_enabled {
+    let formant_stage = formant_target - params.pitch_semitones;
+    let formant = if params.formant_enabled && formant_stage.abs() > 1e-6 {
         FORMANT_LATENCY
     } else {
         0
     };
 
-    pitch + formant
+    if params.phase_vocoder {
+        let pitch = if params.pitch_semitones.abs() < 1e-6 {
+            0
+        } else {
+            PHASE_VOCODER_LATENCY
+        };
+        pitch + formant
+    } else {
+        let pitch = if params.pitch_semitones == 0.0 {
+            hop
+        } else {
+            let ratio = 2f64.powf(params.pitch_semitones as f64 / 12.0);
+            let chunk = (4.0 * ratio - 3.0) * hop as f64 + search;
+            let search_need = search + correlation * ratio;
+            chunk.max(search_need).max(0.0).ceil() as usize + 2
+        };
+        pitch + formant
+    }
 }
 
 #[cfg(test)]
@@ -57,16 +65,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_latency_is_pitch_plus_formant() {
-        assert_eq!(
-            estimated_latency_samples(48_000.0, &Params::default()),
-            480 + FORMANT_LATENCY
-        );
+    fn default_is_idle_with_no_latency() {
+        assert_eq!(estimated_latency_samples(48_000.0, &Params::default()), 0);
     }
 
     #[test]
-    fn formant_off_removes_its_latency() {
+    fn wsola_formant_off_removes_its_latency() {
         let params = Params {
+            phase_vocoder: false,
             formant_enabled: false,
             ..Params::default()
         };
@@ -74,13 +80,15 @@ mod tests {
     }
 
     #[test]
-    fn higher_pitch_adds_latency() {
+    fn wsola_higher_pitch_adds_latency() {
         let low = Params {
+            phase_vocoder: false,
             pitch_semitones: 3.5,
             formant_enabled: false,
             ..Params::default()
         };
         let high = Params {
+            phase_vocoder: false,
             pitch_semitones: 12.0,
             formant_enabled: false,
             ..Params::default()
@@ -91,8 +99,45 @@ mod tests {
     }
 
     #[test]
+    fn phase_vocoder_adds_the_formant_stage_latency() {
+        let params = Params {
+            phase_vocoder: true,
+            pitch_semitones: 12.0,
+            formant_independent: true,
+            formant_semitones: 6.0,
+            ..Params::default()
+        };
+        assert_eq!(
+            estimated_latency_samples(48_000.0, &params),
+            PHASE_VOCODER_LATENCY + FORMANT_LATENCY
+        );
+    }
+
+    #[test]
+    fn formant_only_change_uses_the_formant_stage() {
+        let params = Params {
+            phase_vocoder: true,
+            pitch_semitones: 0.0,
+            formant_independent: true,
+            formant_semitones: -5.0,
+            ..Params::default()
+        };
+        assert_eq!(
+            estimated_latency_samples(48_000.0, &params),
+            FORMANT_LATENCY
+        );
+    }
+
+    #[test]
     fn works_at_44k1() {
-        let latency = estimated_latency_samples(44_100.0, &Params::default());
-        assert!(latency > FORMANT_LATENCY);
+        let params = Params {
+            phase_vocoder: true,
+            pitch_semitones: 12.0,
+            ..Params::default()
+        };
+        assert_eq!(
+            estimated_latency_samples(44_100.0, &params),
+            PHASE_VOCODER_LATENCY
+        );
     }
 }
