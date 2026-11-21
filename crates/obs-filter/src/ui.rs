@@ -103,15 +103,22 @@ pub(crate) unsafe extern "C" fn update(data: *mut c_void, settings: *mut ObsData
 
 pub(crate) unsafe extern "C" fn get_properties(data: *mut c_void) -> *mut ObsProperties {
     guard(ptr::null_mut(), || {
-        let (latency, preset_available, sample_rate) = if data.is_null() {
+        let (latency, preset_available, sample_rate, independent) = if data.is_null() {
             let params = Params::default();
-            (estimated_latency_samples(48_000.0, &params), true, 48_000.0)
+            (
+                estimated_latency_samples(48_000.0, &params),
+                true,
+                48_000.0,
+                params.formant_independent,
+            )
         } else {
             let filter = unsafe { &*data.cast::<FilterData>() };
+            let params = filter.params.load();
             (
                 filter.latency.load(Ordering::Relaxed) as usize,
                 filter.preset.is_some(),
                 filter.sample_rate,
+                params.formant_independent,
             )
         };
 
@@ -121,11 +128,17 @@ pub(crate) unsafe extern "C" fn get_properties(data: *mut c_void) -> *mut ObsPro
         }
 
         unsafe {
-            ffi::obs_properties_add_bool(
+            let independent_prop = ffi::obs_properties_add_bool(
                 props,
                 c"formant_independent".as_ptr(),
                 c"フォルマント独立制御".as_ptr(),
             );
+            if !independent_prop.is_null() {
+                ffi::obs_property_set_modified_callback(
+                    independent_prop,
+                    Some(formant_mode_changed),
+                );
+            }
             ffi::obs_properties_add_bool(
                 props,
                 c"formant_enabled".as_ptr(),
@@ -154,6 +167,7 @@ pub(crate) unsafe extern "C" fn get_properties(data: *mut c_void) -> *mut ObsPro
             );
             if !formant.is_null() {
                 ffi::obs_property_float_set_suffix(formant, c" 半音".as_ptr());
+                ffi::obs_property_set_enabled(formant, independent);
             }
 
             let input_gain = ffi::obs_properties_add_float_slider(
@@ -301,6 +315,28 @@ pub(crate) unsafe extern "C" fn get_properties(data: *mut c_void) -> *mut ObsPro
         }
 
         props
+    })
+}
+
+unsafe extern "C" fn formant_mode_changed(
+    props: *mut ObsProperties,
+    _property: *mut ObsProperty,
+    settings: *mut ObsData,
+) -> bool {
+    guard(false, || {
+        if props.is_null() || settings.is_null() {
+            return false;
+        }
+
+        let independent =
+            unsafe { ffi::obs_data_get_bool(settings, c"formant_independent".as_ptr()) };
+        let formant = unsafe { ffi::obs_properties_get(props, c"formant_semitones".as_ptr()) };
+        if !formant.is_null() {
+            unsafe {
+                ffi::obs_property_set_enabled(formant, independent);
+            }
+        }
+        true
     })
 }
 

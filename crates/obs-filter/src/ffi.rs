@@ -26,6 +26,10 @@ pub const OBS_TEXT_INFO: c_int = 3;
 pub type ObsPropertyClicked =
     Option<unsafe extern "C" fn(*mut ObsProperties, *mut ObsProperty, *mut c_void) -> bool>;
 
+#[cfg(not(test))]
+pub type ObsPropertyModified =
+    Option<unsafe extern "C" fn(*mut ObsProperties, *mut ObsProperty, *mut ObsData) -> bool>;
+
 /// `struct obs_audio_info` from `libobs/obs.h`.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
@@ -157,7 +161,13 @@ unsafe extern "C" {
         description: *const c_char,
         type_: c_int,
     ) -> *mut ObsProperty;
+    pub fn obs_properties_get(props: *mut ObsProperties, name: *const c_char) -> *mut ObsProperty;
     pub fn obs_property_float_set_suffix(property: *mut ObsProperty, suffix: *const c_char);
+    pub fn obs_property_set_enabled(property: *mut ObsProperty, enabled: bool);
+    pub fn obs_property_set_modified_callback(
+        property: *mut ObsProperty,
+        callback: ObsPropertyModified,
+    );
     pub fn obs_property_list_add_string(
         property: *mut ObsProperty,
         name: *const c_char,
