@@ -93,6 +93,51 @@ pub(crate) unsafe extern "C" fn get_defaults(settings: *mut ObsData) {
                 c"output_gain_db".as_ptr(),
                 defaults.output_gain_db as f64,
             );
+            ffi::obs_data_set_default_double(
+                settings,
+                c"tone_low_db".as_ptr(),
+                defaults.tone_low_db as f64,
+            );
+            ffi::obs_data_set_default_double(
+                settings,
+                c"tone_mid_db".as_ptr(),
+                defaults.tone_mid_db as f64,
+            );
+            ffi::obs_data_set_default_double(
+                settings,
+                c"tone_high_db".as_ptr(),
+                defaults.tone_high_db as f64,
+            );
+            ffi::obs_data_set_default_bool(
+                settings,
+                c"compressor_enabled".as_ptr(),
+                defaults.compressor_enabled,
+            );
+            ffi::obs_data_set_default_double(
+                settings,
+                c"compressor_threshold_db".as_ptr(),
+                defaults.compressor_threshold_db as f64,
+            );
+            ffi::obs_data_set_default_double(
+                settings,
+                c"compressor_ratio".as_ptr(),
+                defaults.compressor_ratio as f64,
+            );
+            ffi::obs_data_set_default_double(
+                settings,
+                c"compressor_attack_ms".as_ptr(),
+                defaults.compressor_attack_ms as f64,
+            );
+            ffi::obs_data_set_default_double(
+                settings,
+                c"compressor_release_ms".as_ptr(),
+                defaults.compressor_release_ms as f64,
+            );
+            ffi::obs_data_set_default_double(
+                settings,
+                c"compressor_makeup_db".as_ptr(),
+                defaults.compressor_makeup_db as f64,
+            );
             ffi::obs_data_set_default_bool(settings, c"bypass".as_ptr(), false);
             ffi::obs_data_set_default_string(
                 settings,
@@ -304,6 +349,101 @@ pub(crate) unsafe extern "C" fn get_properties(data: *mut c_void) -> *mut ObsPro
                 ffi::obs_property_float_set_suffix(hold, c" ms".as_ptr());
             }
 
+            let tone_low = ffi::obs_properties_add_float_slider(
+                props,
+                c"tone_low_db".as_ptr(),
+                c"低域 (250Hz)".as_ptr(),
+                -12.0,
+                12.0,
+                0.1,
+            );
+            if !tone_low.is_null() {
+                ffi::obs_property_float_set_suffix(tone_low, c" dB".as_ptr());
+            }
+            let tone_mid = ffi::obs_properties_add_float_slider(
+                props,
+                c"tone_mid_db".as_ptr(),
+                c"プレゼンス (2.5kHz)".as_ptr(),
+                -12.0,
+                12.0,
+                0.1,
+            );
+            if !tone_mid.is_null() {
+                ffi::obs_property_float_set_suffix(tone_mid, c" dB".as_ptr());
+            }
+            let tone_high = ffi::obs_properties_add_float_slider(
+                props,
+                c"tone_high_db".as_ptr(),
+                c"高域 (5kHz)".as_ptr(),
+                -12.0,
+                12.0,
+                0.1,
+            );
+            if !tone_high.is_null() {
+                ffi::obs_property_float_set_suffix(tone_high, c" dB".as_ptr());
+            }
+
+            ffi::obs_properties_add_bool(
+                props,
+                c"compressor_enabled".as_ptr(),
+                c"コンプレッサー".as_ptr(),
+            );
+            let comp_threshold = ffi::obs_properties_add_float_slider(
+                props,
+                c"compressor_threshold_db".as_ptr(),
+                c"コンプ Threshold".as_ptr(),
+                -40.0,
+                0.0,
+                0.1,
+            );
+            if !comp_threshold.is_null() {
+                ffi::obs_property_float_set_suffix(comp_threshold, c" dB".as_ptr());
+            }
+            let comp_ratio = ffi::obs_properties_add_float_slider(
+                props,
+                c"compressor_ratio".as_ptr(),
+                c"コンプ Ratio".as_ptr(),
+                1.0,
+                10.0,
+                0.1,
+            );
+            if !comp_ratio.is_null() {
+                ffi::obs_property_float_set_suffix(comp_ratio, c":1".as_ptr());
+            }
+            let comp_attack = ffi::obs_properties_add_float_slider(
+                props,
+                c"compressor_attack_ms".as_ptr(),
+                c"コンプ Attack".as_ptr(),
+                1.0,
+                100.0,
+                0.1,
+            );
+            if !comp_attack.is_null() {
+                ffi::obs_property_float_set_suffix(comp_attack, c" ms".as_ptr());
+            }
+            let comp_release = ffi::obs_properties_add_float_slider(
+                props,
+                c"compressor_release_ms".as_ptr(),
+                c"コンプ Release".as_ptr(),
+                10.0,
+                500.0,
+                1.0,
+            );
+            if !comp_release.is_null() {
+                ffi::obs_property_float_set_suffix(comp_release, c" ms".as_ptr());
+            }
+            let comp_makeup = ffi::obs_properties_add_float_slider(
+                props,
+                c"compressor_makeup_db".as_ptr(),
+                c"コンプ Makeup".as_ptr(),
+                0.0,
+                12.0,
+                0.1,
+            );
+            if !comp_makeup.is_null() {
+                ffi::obs_property_float_set_suffix(comp_makeup, c" dB".as_ptr());
+            }
+
             let output_gain = ffi::obs_properties_add_float_slider(
                 props,
                 c"output_gain_db".as_ptr(),
@@ -464,6 +604,43 @@ unsafe extern "C" fn apply_preset(
                 c"output_gain_db".as_ptr(),
                 preset.output_gain_db as f64,
             );
+            ffi::obs_data_set_double(settings, c"tone_low_db".as_ptr(), preset.tone_low_db as f64);
+            ffi::obs_data_set_double(settings, c"tone_mid_db".as_ptr(), preset.tone_mid_db as f64);
+            ffi::obs_data_set_double(
+                settings,
+                c"tone_high_db".as_ptr(),
+                preset.tone_high_db as f64,
+            );
+            ffi::obs_data_set_bool(
+                settings,
+                c"compressor_enabled".as_ptr(),
+                preset.compressor_enabled,
+            );
+            ffi::obs_data_set_double(
+                settings,
+                c"compressor_threshold_db".as_ptr(),
+                preset.compressor_threshold_db as f64,
+            );
+            ffi::obs_data_set_double(
+                settings,
+                c"compressor_ratio".as_ptr(),
+                preset.compressor_ratio as f64,
+            );
+            ffi::obs_data_set_double(
+                settings,
+                c"compressor_attack_ms".as_ptr(),
+                preset.compressor_attack_ms as f64,
+            );
+            ffi::obs_data_set_double(
+                settings,
+                c"compressor_release_ms".as_ptr(),
+                preset.compressor_release_ms as f64,
+            );
+            ffi::obs_data_set_double(
+                settings,
+                c"compressor_makeup_db".as_ptr(),
+                preset.compressor_makeup_db as f64,
+            );
             ffi::obs_data_set_bool(settings, c"bypass".as_ptr(), false);
             if let Ok(cfile) = CString::new(file.as_str()) {
                 ffi::obs_data_set_string(settings, c"preset".as_ptr(), cfile.as_ptr());
@@ -612,6 +789,28 @@ unsafe fn read_params(settings: *mut ObsData) -> Params {
 
         output_gain_db: unsafe { ffi::obs_data_get_double(settings, c"output_gain_db".as_ptr()) }
             as f32,
+        tone_low_db: unsafe { ffi::obs_data_get_double(settings, c"tone_low_db".as_ptr()) } as f32,
+        tone_mid_db: unsafe { ffi::obs_data_get_double(settings, c"tone_mid_db".as_ptr()) } as f32,
+        tone_high_db: unsafe { ffi::obs_data_get_double(settings, c"tone_high_db".as_ptr()) }
+            as f32,
+        compressor_enabled: unsafe {
+            ffi::obs_data_get_bool(settings, c"compressor_enabled".as_ptr())
+        },
+        compressor_threshold_db: unsafe {
+            ffi::obs_data_get_double(settings, c"compressor_threshold_db".as_ptr())
+        } as f32,
+        compressor_ratio: unsafe {
+            ffi::obs_data_get_double(settings, c"compressor_ratio".as_ptr())
+        } as f32,
+        compressor_attack_ms: unsafe {
+            ffi::obs_data_get_double(settings, c"compressor_attack_ms".as_ptr())
+        } as f32,
+        compressor_release_ms: unsafe {
+            ffi::obs_data_get_double(settings, c"compressor_release_ms".as_ptr())
+        } as f32,
+        compressor_makeup_db: unsafe {
+            ffi::obs_data_get_double(settings, c"compressor_makeup_db".as_ptr())
+        } as f32,
         bypass: unsafe { ffi::obs_data_get_bool(settings, c"bypass".as_ptr()) },
     }
 }

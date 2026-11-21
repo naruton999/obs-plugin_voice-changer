@@ -22,6 +22,11 @@ semitones = 3.5
 enabled = true
 semitones = 2.5
 
+[tone]
+low_db = -1.0
+mid_db = 2.5
+high_db = 4.0
+
 [output]
 gain_db = 0.0
 

@@ -26,6 +26,15 @@ pub(crate) struct AtomicParams {
     formant_semitones: AtomicU32,
 
     output_gain_db: AtomicU32,
+    tone_low_db: AtomicU32,
+    tone_mid_db: AtomicU32,
+    tone_high_db: AtomicU32,
+    compressor_enabled: AtomicBool,
+    compressor_threshold_db: AtomicU32,
+    compressor_ratio: AtomicU32,
+    compressor_attack_ms: AtomicU32,
+    compressor_release_ms: AtomicU32,
+    compressor_makeup_db: AtomicU32,
     bypass: AtomicBool,
 }
 
@@ -45,6 +54,15 @@ impl AtomicParams {
             formant_independent: AtomicBool::new(false),
             formant_semitones: AtomicU32::new(0),
             output_gain_db: AtomicU32::new(0),
+            tone_low_db: AtomicU32::new(0),
+            tone_mid_db: AtomicU32::new(0),
+            tone_high_db: AtomicU32::new(0),
+            compressor_enabled: AtomicBool::new(false),
+            compressor_threshold_db: AtomicU32::new(0),
+            compressor_ratio: AtomicU32::new(0),
+            compressor_attack_ms: AtomicU32::new(0),
+            compressor_release_ms: AtomicU32::new(0),
+            compressor_makeup_db: AtomicU32::new(0),
             bypass: AtomicBool::new(false),
         };
         store.store(params);
@@ -82,6 +100,24 @@ impl AtomicParams {
 
         self.output_gain_db
             .store(params.output_gain_db.to_bits(), Ordering::Relaxed);
+        self.tone_low_db
+            .store(params.tone_low_db.to_bits(), Ordering::Relaxed);
+        self.tone_mid_db
+            .store(params.tone_mid_db.to_bits(), Ordering::Relaxed);
+        self.tone_high_db
+            .store(params.tone_high_db.to_bits(), Ordering::Relaxed);
+        self.compressor_enabled
+            .store(params.compressor_enabled, Ordering::Relaxed);
+        self.compressor_threshold_db
+            .store(params.compressor_threshold_db.to_bits(), Ordering::Relaxed);
+        self.compressor_ratio
+            .store(params.compressor_ratio.to_bits(), Ordering::Relaxed);
+        self.compressor_attack_ms
+            .store(params.compressor_attack_ms.to_bits(), Ordering::Relaxed);
+        self.compressor_release_ms
+            .store(params.compressor_release_ms.to_bits(), Ordering::Relaxed);
+        self.compressor_makeup_db
+            .store(params.compressor_makeup_db.to_bits(), Ordering::Relaxed);
         self.bypass.store(params.bypass, Ordering::Relaxed);
     }
 
@@ -104,6 +140,19 @@ impl AtomicParams {
             formant_semitones: f32::from_bits(self.formant_semitones.load(Ordering::Relaxed)),
 
             output_gain_db: f32::from_bits(self.output_gain_db.load(Ordering::Relaxed)),
+            tone_low_db: f32::from_bits(self.tone_low_db.load(Ordering::Relaxed)),
+            tone_mid_db: f32::from_bits(self.tone_mid_db.load(Ordering::Relaxed)),
+            tone_high_db: f32::from_bits(self.tone_high_db.load(Ordering::Relaxed)),
+            compressor_enabled: self.compressor_enabled.load(Ordering::Relaxed),
+            compressor_threshold_db: f32::from_bits(
+                self.compressor_threshold_db.load(Ordering::Relaxed),
+            ),
+            compressor_ratio: f32::from_bits(self.compressor_ratio.load(Ordering::Relaxed)),
+            compressor_attack_ms: f32::from_bits(self.compressor_attack_ms.load(Ordering::Relaxed)),
+            compressor_release_ms: f32::from_bits(
+                self.compressor_release_ms.load(Ordering::Relaxed),
+            ),
+            compressor_makeup_db: f32::from_bits(self.compressor_makeup_db.load(Ordering::Relaxed)),
             bypass: self.bypass.load(Ordering::Relaxed),
         }
     }
@@ -127,6 +176,15 @@ mod tests {
             formant_enabled: false,
             formant_independent: true,
             formant_semitones: 2.5,
+            tone_low_db: -3.0,
+            tone_mid_db: 2.0,
+            tone_high_db: 6.0,
+            compressor_enabled: true,
+            compressor_threshold_db: -18.0,
+            compressor_ratio: 3.0,
+            compressor_attack_ms: 8.0,
+            compressor_release_ms: 150.0,
+            compressor_makeup_db: 2.0,
             output_gain_db: 4.0,
             bypass: true,
         }

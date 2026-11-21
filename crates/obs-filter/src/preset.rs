@@ -20,6 +20,17 @@ pub(crate) struct Preset {
     pub formant_semitones: f32,
 
     pub output_gain_db: f32,
+
+    pub tone_low_db: f32,
+    pub tone_mid_db: f32,
+    pub tone_high_db: f32,
+
+    pub compressor_enabled: bool,
+    pub compressor_threshold_db: f32,
+    pub compressor_ratio: f32,
+    pub compressor_attack_ms: f32,
+    pub compressor_release_ms: f32,
+    pub compressor_makeup_db: f32,
 }
 
 impl Default for Preset {
@@ -37,6 +48,15 @@ impl Default for Preset {
             formant_enabled: true,
             formant_semitones: 0.0,
             output_gain_db: 0.0,
+            tone_low_db: 0.0,
+            tone_mid_db: 0.0,
+            tone_high_db: 0.0,
+            compressor_enabled: false,
+            compressor_threshold_db: -18.0,
+            compressor_ratio: 3.0,
+            compressor_attack_ms: 8.0,
+            compressor_release_ms: 150.0,
+            compressor_makeup_db: 2.0,
         }
     }
 }
@@ -102,6 +122,21 @@ pub(crate) fn parse(text: &str) -> Result<Preset, String> {
             "output" if key == "gain_db" => {
                 preset.output_gain_db = parse_f32(value)?;
             }
+            "tone" => match key {
+                "low_db" => preset.tone_low_db = parse_f32(value)?,
+                "mid_db" => preset.tone_mid_db = parse_f32(value)?,
+                "high_db" => preset.tone_high_db = parse_f32(value)?,
+                _ => {}
+            },
+            "compressor" => match key {
+                "enabled" => preset.compressor_enabled = value == "true",
+                "threshold_db" => preset.compressor_threshold_db = parse_f32(value)?,
+                "ratio" => preset.compressor_ratio = parse_f32(value)?,
+                "attack_ms" => preset.compressor_attack_ms = parse_f32(value)?,
+                "release_ms" => preset.compressor_release_ms = parse_f32(value)?,
+                "makeup_db" => preset.compressor_makeup_db = parse_f32(value)?,
+                _ => {}
+            },
             _ => {}
         }
     }
@@ -132,6 +167,10 @@ mod tests {
         assert_eq!(preset.pitch_semitones, 3.5);
         assert!(preset.formant_enabled);
         assert_eq!(preset.formant_semitones, 2.5);
+        assert_eq!(preset.tone_low_db, -1.0);
+        assert_eq!(preset.tone_mid_db, 2.5);
+        assert_eq!(preset.tone_high_db, 4.0);
+        assert!(!preset.compressor_enabled);
     }
 
     #[test]
@@ -142,6 +181,15 @@ mod tests {
         assert_eq!(preset.pitch_semitones, 12.0);
         assert!(preset.formant_enabled);
         assert_eq!(preset.formant_semitones, 4.4);
+        assert_eq!(preset.tone_low_db, -3.0);
+        assert_eq!(preset.tone_mid_db, 2.0);
+        assert_eq!(preset.tone_high_db, 6.0);
+        assert!(preset.compressor_enabled);
+        assert_eq!(preset.compressor_threshold_db, -18.0);
+        assert_eq!(preset.compressor_ratio, 3.0);
+        assert_eq!(preset.compressor_attack_ms, 8.0);
+        assert_eq!(preset.compressor_release_ms, 150.0);
+        assert_eq!(preset.compressor_makeup_db, 2.0);
         assert_eq!(preset.output_gain_db, 2.0);
     }
 

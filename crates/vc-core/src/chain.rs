@@ -1,12 +1,14 @@
 use crate::params::Params;
 use crate::smooth::LinearSmoother;
 use crate::stages::DspStage;
+use crate::stages::compressor::CompressorStage;
 use crate::stages::formant::FormantStage;
 use crate::stages::gain::GainStage;
 use crate::stages::gate::GateStage;
 use crate::stages::hpf::HighPassStage;
 use crate::stages::pitch::PitchStage;
 use crate::stages::soft_clip::SoftClipStage;
+use crate::stages::tone::ToneStage;
 
 /// Ring buffer length for the latency-maintaining bypass. Large enough for
 /// the maximum pitch + formant latency at 48 kHz.
@@ -26,6 +28,8 @@ pub struct VoiceChanger {
     gate: GateStage,
     pitch: PitchStage,
     formant: FormantStage,
+    tone: ToneStage,
+    compressor: CompressorStage,
     output_gain: GainStage,
     soft_clip: SoftClipStage,
 
@@ -63,6 +67,8 @@ impl VoiceChanger {
             gate: GateStage::new(sample_rate),
             pitch: PitchStage::new(sample_rate, max_block_size),
             formant: FormantStage::new(sample_rate, max_block_size),
+            tone: ToneStage::new(sample_rate),
+            compressor: CompressorStage::new(sample_rate),
             output_gain: GainStage::new(param_ramp),
             soft_clip: SoftClipStage::new(),
             bypass_mix: LinearSmoother::new(0.0, bypass_ramp),
@@ -157,6 +163,16 @@ impl VoiceChanger {
         let formant_stage = formant_target - params.pitch_semitones;
         self.formant
             .set_params(params.formant_enabled, formant_stage);
+        self.tone
+            .set_params(params.tone_low_db, params.tone_mid_db, params.tone_high_db);
+        self.compressor.set_params(
+            params.compressor_enabled,
+            params.compressor_threshold_db,
+            params.compressor_ratio,
+            params.compressor_attack_ms,
+            params.compressor_release_ms,
+            params.compressor_makeup_db,
+        );
         self.output_gain.set_gain_db(params.output_gain_db);
         self.bypass_mix
             .set_target(if params.bypass { 1.0 } else { 0.0 });
@@ -193,6 +209,8 @@ impl VoiceChanger {
         self.gate.process(buf);
         self.pitch.process(buf);
         self.formant.process(buf);
+        self.tone.process(buf);
+        self.compressor.process(buf);
         self.output_gain.process(buf);
         self.soft_clip.process(buf);
 
@@ -220,6 +238,8 @@ impl VoiceChanger {
         self.gate.reset();
         self.pitch.reset();
         self.formant.reset();
+        self.tone.reset();
+        self.compressor.reset();
         self.output_gain.reset();
         self.soft_clip.reset();
         self.dry_delay.fill(0.0);

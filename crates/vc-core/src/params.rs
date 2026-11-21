@@ -22,6 +22,17 @@ pub struct Params {
 
     pub output_gain_db: f32,
 
+    pub tone_low_db: f32,
+    pub tone_mid_db: f32,
+    pub tone_high_db: f32,
+
+    pub compressor_enabled: bool,
+    pub compressor_threshold_db: f32,
+    pub compressor_ratio: f32,
+    pub compressor_attack_ms: f32,
+    pub compressor_release_ms: f32,
+    pub compressor_makeup_db: f32,
+
     /// Outputs the dry signal while keeping the processing chain running.
     pub bypass: bool,
 }
@@ -42,6 +53,18 @@ impl Default for Params {
             formant_independent: false,
             formant_semitones: 0.0,
             output_gain_db: 0.0,
+
+            tone_low_db: 0.0,
+            tone_mid_db: 0.0,
+            tone_high_db: 0.0,
+
+            compressor_enabled: false,
+            compressor_threshold_db: -18.0,
+            compressor_ratio: 3.0,
+            compressor_attack_ms: 8.0,
+            compressor_release_ms: 150.0,
+            compressor_makeup_db: 2.0,
+
             bypass: false,
         }
     }
@@ -86,6 +109,35 @@ impl Params {
                 finite_or(self.output_gain_db, d.output_gain_db),
                 -24.0,
                 24.0,
+            ),
+            tone_low_db: clamp(finite_or(self.tone_low_db, d.tone_low_db), -12.0, 12.0),
+            tone_mid_db: clamp(finite_or(self.tone_mid_db, d.tone_mid_db), -12.0, 12.0),
+            tone_high_db: clamp(finite_or(self.tone_high_db, d.tone_high_db), -12.0, 12.0),
+            compressor_enabled: self.compressor_enabled,
+            compressor_threshold_db: clamp(
+                finite_or(self.compressor_threshold_db, d.compressor_threshold_db),
+                -40.0,
+                0.0,
+            ),
+            compressor_ratio: clamp(
+                finite_or(self.compressor_ratio, d.compressor_ratio),
+                1.0,
+                10.0,
+            ),
+            compressor_attack_ms: clamp(
+                finite_or(self.compressor_attack_ms, d.compressor_attack_ms),
+                1.0,
+                100.0,
+            ),
+            compressor_release_ms: clamp(
+                finite_or(self.compressor_release_ms, d.compressor_release_ms),
+                10.0,
+                500.0,
+            ),
+            compressor_makeup_db: clamp(
+                finite_or(self.compressor_makeup_db, d.compressor_makeup_db),
+                0.0,
+                12.0,
             ),
             bypass: self.bypass,
         }
