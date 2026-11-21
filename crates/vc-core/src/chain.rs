@@ -55,7 +55,7 @@ impl VoiceChanger {
             input_gain: GainStage::new(param_ramp),
             hpf: HighPassStage::new(sample_rate, param_ramp),
             gate: GateStage::new(),
-            pitch: PitchStage::new(),
+            pitch: PitchStage::new(sample_rate, max_block_size),
             formant: FormantStage::new(),
             output_gain: GainStage::new(param_ramp),
             soft_clip: SoftClipStage::new(),
@@ -91,6 +91,13 @@ impl VoiceChanger {
     #[must_use]
     pub fn max_block_size(&self) -> usize {
         self.max_block_size
+    }
+
+    /// Current processing latency in samples (pitch stage only; formant is not
+    /// implemented yet).
+    #[must_use]
+    pub fn latency_samples(&self) -> usize {
+        self.pitch.latency_samples()
     }
 
     /// Number of blocks zeroed because of NaN/Inf.
