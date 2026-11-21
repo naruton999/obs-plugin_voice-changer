@@ -1,4 +1,4 @@
-use std::ffi::{CStr, CString, c_void};
+use std::ffi::{CStr, CString, c_int, c_void};
 use std::ptr;
 use std::sync::atomic::Ordering;
 
@@ -8,6 +8,9 @@ use crate::ffi::{self, ObsData, ObsProperties, ObsProperty};
 use crate::filter::FilterData;
 use crate::guard;
 use crate::preset::{Preset, PresetEntry};
+
+const LOG_WARNING: c_int = 200;
+const LOG_INFO: c_int = 300;
 
 pub(crate) unsafe extern "C" fn get_defaults(settings: *mut ObsData) {
     guard((), || {
@@ -458,21 +461,63 @@ unsafe extern "C" fn apply_preset(
     })
 }
 
-pub(crate) fn load_presets() -> Vec<PresetEntry> {
-    let data_path = unsafe { ffi::obs_get_module_data_path(crate::module::obs_current_module()) };
-    if data_path.is_null() {
-        return Vec::new();
+fn presets_dir() -> Option<std::path::PathBuf> {
+    let module = crate::module::obs_current_module();
+
+    // Prefer a resolved preset file path. This works even when the module
+    // data path is relative (legacy Windows layout).
+    let probe = unsafe { ffi::obs_find_module_file(module, c"presets/sharp-female.toml".as_ptr()) };
+    if !probe.is_null() {
+        let path = unsafe { CStr::from_ptr(probe) }
+            .to_string_lossy()
+            .into_owned();
+        unsafe { ffi::bfree(probe.cast()) };
+        if let Some(parent) = std::path::Path::new(&path).parent() {
+            log(
+                LOG_INFO,
+                &format!("voice-changer: preset file found: {path}"),
+            );
+            return Some(parent.to_path_buf());
+        }
     }
 
+    let data_path = unsafe { ffi::obs_get_module_data_path(module) };
+    if data_path.is_null() {
+        log(LOG_WARNING, "voice-changer: module data path is null");
+        return None;
+    }
     let data_path = unsafe { CStr::from_ptr(data_path) }
         .to_string_lossy()
         .into_owned();
-    let dir = std::path::Path::new(&data_path).join("presets");
-    let Ok(entries) = std::fs::read_dir(dir) else {
+    Some(std::path::Path::new(&data_path).join("presets"))
+}
+
+fn log(level: c_int, message: &str) {
+    if let Ok(message) = CString::new(message) {
+        unsafe { ffi::obs_log(level, message.as_ptr()) };
+    }
+}
+
+pub(crate) fn load_presets() -> Vec<PresetEntry> {
+    let Some(dir) = presets_dir() else {
         return Vec::new();
+    };
+    let entries = match std::fs::read_dir(&dir) {
+        Ok(entries) => entries,
+        Err(err) => {
+            log(
+                LOG_WARNING,
+                &format!(
+                    "voice-changer: preset directory not readable: {} ({err})",
+                    dir.display()
+                ),
+            );
+            return Vec::new();
+        }
     };
 
     let mut presets = Vec::new();
+    let mut skipped = 0usize;
     for entry in entries.flatten() {
         let path = entry.path();
         if path.extension().and_then(|ext| ext.to_str()) != Some("toml") {
@@ -486,14 +531,24 @@ pub(crate) fn load_presets() -> Vec<PresetEntry> {
             continue;
         };
         let Ok(text) = std::fs::read_to_string(&path) else {
+            skipped += 1;
             continue;
         };
         let Ok(preset) = crate::preset::parse(&text) else {
+            skipped += 1;
             continue;
         };
         presets.push(PresetEntry { file, preset });
     }
     presets.sort_by(|a, b| a.file.cmp(&b.file));
+    log(
+        LOG_INFO,
+        &format!(
+            "voice-changer: loaded {} preset(s) from {} (skipped {skipped})",
+            presets.len(),
+            dir.display()
+        ),
+    );
     presets
 }
 

@@ -179,6 +179,9 @@ unsafe extern "C" {
     pub fn obs_source_update(source: *mut ObsSource, settings: *mut ObsData);
 
     pub fn obs_get_module_data_path(module: *mut c_void) -> *const c_char;
+    pub fn obs_find_module_file(module: *mut c_void, file: *const c_char) -> *mut c_char;
+    pub fn bfree(ptr: *mut c_void);
+    pub fn obs_log(level: c_int, format: *const c_char, ...);
 }
 
 #[cfg(test)]
