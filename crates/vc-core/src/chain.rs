@@ -56,7 +56,7 @@ impl VoiceChanger {
             hpf: HighPassStage::new(sample_rate, param_ramp),
             gate: GateStage::new(),
             pitch: PitchStage::new(sample_rate, max_block_size),
-            formant: FormantStage::new(),
+            formant: FormantStage::new(sample_rate, max_block_size),
             output_gain: GainStage::new(param_ramp),
             soft_clip: SoftClipStage::new(),
             bypass_mix: LinearSmoother::new(0.0, bypass_ramp),
@@ -93,11 +93,10 @@ impl VoiceChanger {
         self.max_block_size
     }
 
-    /// Current processing latency in samples (pitch stage only; formant is not
-    /// implemented yet).
+    /// Current processing latency in samples (pitch and formant stages).
     #[must_use]
     pub fn latency_samples(&self) -> usize {
-        self.pitch.latency_samples()
+        self.pitch.latency_samples() + self.formant.latency_samples()
     }
 
     /// Number of blocks zeroed because of NaN/Inf.
@@ -139,11 +138,13 @@ impl VoiceChanger {
             params.gate_hold_ms,
         );
         self.pitch.set_semitones(params.pitch_semitones);
-        self.formant.set_params(
-            params.formant_enabled,
-            params.formant_independent,
-            params.formant_semitones,
-        );
+        let formant_semitones = if params.formant_independent {
+            params.formant_semitones
+        } else {
+            params.pitch_semitones
+        };
+        self.formant
+            .set_params(params.formant_enabled, formant_semitones);
         self.output_gain.set_gain_db(params.output_gain_db);
         self.bypass_mix
             .set_target(if params.bypass { 1.0 } else { 0.0 });
