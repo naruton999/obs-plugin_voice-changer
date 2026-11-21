@@ -216,10 +216,9 @@ fn process(filter: &mut FilterData, audio: &mut ObsAudioData) {
                     scratch[i] = 0.5 * (left_buf[offset + i] + right_buf[offset + i]);
                 }
                 chains[0].process(&mut scratch[..len]);
-                for i in 0..len {
-                    left_buf[offset + i] = scratch[i];
-                    right_buf[offset + i] = scratch[i];
-                }
+                let destination = offset..offset + len;
+                left_buf[destination.clone()].copy_from_slice(&scratch[..len]);
+                right_buf[destination].copy_from_slice(&scratch[..len]);
                 offset += len;
             }
         }
