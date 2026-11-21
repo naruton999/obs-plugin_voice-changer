@@ -137,3 +137,39 @@ fn block_size_does_not_change_output() {
         assert!((a - b).abs() < 1e-6, "a = {a}, b = {b}");
     }
 }
+
+fn goertzel(buf: &[f32], freq: f32, sample_rate: f32) -> f32 {
+    let n = buf.len();
+    let bin = (freq * n as f32 / sample_rate).round();
+    let omega = TAU * bin / n as f32;
+    let coeff = 2.0 * omega.cos();
+    let (mut s1, mut s2) = (0.0f32, 0.0f32);
+    for &value in buf {
+        let s0 = value + coeff * s1 - s2;
+        s2 = s1;
+        s1 = s0;
+    }
+    (s1 * s1 + s2 * s2 - coeff * s1 * s2).sqrt() / n as f32
+}
+
+#[test]
+fn chain_pitch_shifts_sine_up() {
+    let input = sine(440.0, 0.25, 48_000, SR);
+    let mut chain = VoiceChanger::new(SR, 2048);
+    chain.set_params(Params {
+        pitch_semitones: 3.5,
+        ..Params::default()
+    });
+
+    let out = process_blocks(&mut chain, &input, 480);
+    let start = (0.30 * SR) as usize;
+    let end = (0.90 * SR) as usize;
+    let expected = 440.0 * 2f32.powf(3.5 / 12.0);
+
+    let expected_energy = goertzel(&out[start..end], expected, SR);
+    let original_energy = goertzel(&out[start..end], 440.0, SR);
+    assert!(
+        expected_energy > original_energy * 50.0,
+        "expected = {expected_energy}, original = {original_energy}"
+    );
+}
