@@ -1,0 +1,43 @@
+# Exclude everything
+/*
+
+# Except for default project files
+!/.github
+!/build-aux
+!/Cargo.lock
+!/Cargo.toml
+!/cmake
+!/crates
+!/data
+!/docs
+!/presets
+!/src
+!/tests
+!/.gitmodules
+!/rust-toolchain.toml
+!/third_party
+
+# Exclude local-only files
+/AGENTS.md
+/docs/proposals/
+/third_party/sdk/
+/third_party/df-ffi/target/
+/build-sdk.log
+/dist/
+!.clang-format
+!.gersemirc
+!.gitignore
+!buildspec.json
+!CMakeLists.txt
+!CMakePresets.json
+!LICENSE
+!README.md
+
+# Exclude lock files
+*.lock.json
+
+# Exclude macOS legacy resource forks
+.DS_Store
+
+# Exclude CMake build number cache
+/cmake/.CMakeBuildNumber
