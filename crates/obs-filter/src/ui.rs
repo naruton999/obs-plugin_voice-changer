@@ -155,7 +155,7 @@ pub(crate) unsafe extern "C" fn get_defaults(settings: *mut ObsData) {
             ffi::obs_data_set_default_string(
                 settings,
                 c"preset".as_ptr(),
-                c"sharp-female".as_ptr(),
+                c"natural-female".as_ptr(),
             );
         }
     });
