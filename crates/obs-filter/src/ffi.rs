@@ -12,6 +12,19 @@ pub const MAX_AV_PLANES: usize = 8;
 pub enum ObsData {}
 pub enum ObsSource {}
 pub enum ObsProperties {}
+#[cfg(not(test))]
+pub enum ObsProperty {}
+
+#[cfg(not(test))]
+pub const OBS_COMBO_TYPE_LIST: c_int = 2;
+#[cfg(not(test))]
+pub const OBS_COMBO_FORMAT_STRING: c_int = 3;
+#[cfg(not(test))]
+pub const OBS_TEXT_INFO: c_int = 3;
+
+#[cfg(not(test))]
+pub type ObsPropertyClicked =
+    Option<unsafe extern "C" fn(*mut ObsProperties, *mut ObsProperty, *mut c_void) -> bool>;
 
 /// `struct obs_audio_info` from `libobs/obs.h`.
 #[repr(C)]
@@ -96,6 +109,66 @@ pub struct ObsSourceInfo {
 unsafe extern "C" {
     pub fn obs_register_source_s(info: *const ObsSourceInfo, size: usize);
     pub fn obs_get_audio_info(oai: *mut ObsAudioInfo) -> bool;
+
+    pub fn obs_data_get_double(data: *mut ObsData, name: *const c_char) -> f64;
+    pub fn obs_data_get_bool(data: *mut ObsData, name: *const c_char) -> bool;
+    pub fn obs_data_set_double(data: *mut ObsData, name: *const c_char, value: f64);
+    pub fn obs_data_set_bool(data: *mut ObsData, name: *const c_char, value: bool);
+    pub fn obs_data_set_string(data: *mut ObsData, name: *const c_char, value: *const c_char);
+    pub fn obs_data_set_default_double(data: *mut ObsData, name: *const c_char, value: f64);
+    pub fn obs_data_set_default_bool(data: *mut ObsData, name: *const c_char, value: bool);
+    pub fn obs_data_set_default_string(
+        data: *mut ObsData,
+        name: *const c_char,
+        value: *const c_char,
+    );
+    pub fn obs_data_release(data: *mut ObsData);
+
+    pub fn obs_properties_create() -> *mut ObsProperties;
+    pub fn obs_properties_add_float_slider(
+        props: *mut ObsProperties,
+        name: *const c_char,
+        description: *const c_char,
+        min: f64,
+        max: f64,
+        step: f64,
+    ) -> *mut ObsProperty;
+    pub fn obs_properties_add_bool(
+        props: *mut ObsProperties,
+        name: *const c_char,
+        description: *const c_char,
+    ) -> *mut ObsProperty;
+    pub fn obs_properties_add_list(
+        props: *mut ObsProperties,
+        name: *const c_char,
+        description: *const c_char,
+        type_: c_int,
+        format: c_int,
+    ) -> *mut ObsProperty;
+    pub fn obs_properties_add_button(
+        props: *mut ObsProperties,
+        name: *const c_char,
+        text: *const c_char,
+        callback: ObsPropertyClicked,
+    ) -> *mut ObsProperty;
+    pub fn obs_properties_add_text(
+        props: *mut ObsProperties,
+        name: *const c_char,
+        description: *const c_char,
+        type_: c_int,
+    ) -> *mut ObsProperty;
+    pub fn obs_property_float_set_suffix(property: *mut ObsProperty, suffix: *const c_char);
+    pub fn obs_property_list_add_string(
+        property: *mut ObsProperty,
+        name: *const c_char,
+        value: *const c_char,
+    ) -> usize;
+
+    pub fn obs_source_get_settings(source: *const ObsSource) -> *mut ObsData;
+    pub fn obs_source_update(source: *mut ObsSource, settings: *mut ObsData);
+
+    pub fn obs_find_module_file(module: *mut c_void, file: *const c_char) -> *mut c_char;
+    pub fn bfree(ptr: *mut c_void);
 }
 
 #[cfg(test)]

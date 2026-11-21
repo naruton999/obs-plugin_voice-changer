@@ -13,6 +13,9 @@ mod filter;
 #[cfg(not(test))]
 mod module;
 mod params;
+mod preset;
+#[cfg(not(test))]
+mod ui;
 
 #[cfg(not(test))]
 pub(crate) fn guard<R>(default: R, f: impl FnOnce() -> R) -> R {

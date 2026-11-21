@@ -1,0 +1,159 @@
+/// Preset values loaded from `presets/*.toml`.
+///
+/// Only the fields used by this plugin are stored. Unknown fields and the
+/// `[reference]` section are ignored so that presets remain forward compatible.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Preset {
+    pub input_gain_db: f32,
+    pub hpf_hz: f32,
+
+    pub gate_enabled: bool,
+    pub gate_threshold_db: f32,
+    pub gate_ratio: f32,
+    pub gate_attack_ms: f32,
+    pub gate_release_ms: f32,
+    pub gate_hold_ms: f32,
+
+    pub pitch_semitones: f32,
+
+    pub formant_enabled: bool,
+    pub formant_semitones: f32,
+
+    pub output_gain_db: f32,
+}
+
+impl Default for Preset {
+    fn default() -> Self {
+        Self {
+            input_gain_db: 0.0,
+            hpf_hz: 80.0,
+            gate_enabled: false,
+            gate_threshold_db: -45.0,
+            gate_ratio: 4.0,
+            gate_attack_ms: 5.0,
+            gate_release_ms: 120.0,
+            gate_hold_ms: 40.0,
+            pitch_semitones: 0.0,
+            formant_enabled: true,
+            formant_semitones: 0.0,
+            output_gain_db: 0.0,
+        }
+    }
+}
+
+pub(crate) fn parse(text: &str) -> Result<Preset, String> {
+    let mut preset = Preset::default();
+    let mut version = None;
+    let mut section = "";
+
+    for raw in text.lines() {
+        let line = raw.split('#').next().unwrap_or("").trim();
+        if line.is_empty() {
+            continue;
+        }
+
+        if line.starts_with('[') && line.ends_with(']') {
+            section = &line[1..line.len() - 1];
+            continue;
+        }
+
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let key = key.trim();
+        let value = value.trim();
+
+        if section.is_empty() {
+            if key == "schema_version" {
+                version = value.parse::<i32>().ok();
+            }
+            continue;
+        }
+
+        match section {
+            "input" => match key {
+                "gain_db" => preset.input_gain_db = parse_f32(value)?,
+                "hpf_hz" => preset.hpf_hz = parse_f32(value)?,
+                _ => {}
+            },
+            "gate" => match key {
+                "enabled" => preset.gate_enabled = value == "true",
+                "threshold_db" => preset.gate_threshold_db = parse_f32(value)?,
+                "ratio" => preset.gate_ratio = parse_f32(value)?,
+                "attack_ms" => preset.gate_attack_ms = parse_f32(value)?,
+                "release_ms" => preset.gate_release_ms = parse_f32(value)?,
+                "hold_ms" => preset.gate_hold_ms = parse_f32(value)?,
+                _ => {}
+            },
+            "pitch" if key == "semitones" => {
+                preset.pitch_semitones = parse_f32(value)?;
+            }
+            "formant" => match key {
+                "enabled" => preset.formant_enabled = value == "true",
+                "semitones" => preset.formant_semitones = parse_f32(value)?,
+                _ => {}
+            },
+            "output" if key == "gain_db" => {
+                preset.output_gain_db = parse_f32(value)?;
+            }
+            _ => {}
+        }
+    }
+
+    match version {
+        Some(1) => Ok(preset),
+        Some(other) => Err(format!("unsupported schema_version: {other}")),
+        None => Err("missing schema_version".to_string()),
+    }
+}
+
+fn parse_f32(value: &str) -> Result<f32, String> {
+    value
+        .parse::<f32>()
+        .map_err(|_| format!("invalid number: {value}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_the_bundled_preset() {
+        let preset = parse(include_str!("../../../presets/sharp-female.toml")).unwrap();
+        assert_eq!(preset.input_gain_db, 0.0);
+        assert_eq!(preset.hpf_hz, 80.0);
+        assert!(!preset.gate_enabled);
+        assert_eq!(preset.pitch_semitones, 3.5);
+        assert!(preset.formant_enabled);
+        assert_eq!(preset.formant_semitones, 2.5);
+    }
+
+    #[test]
+    fn ignores_unknown_fields_and_reference_section() {
+        let text = r#"
+schema_version = 1
+name = "test"
+unknown = 1
+
+[input]
+gain_db = -3.0
+future_field = true
+
+[reference]
+low_shelf = { freq = 180.0, gain_db = -1.0 }
+"#;
+        let preset = parse(text).unwrap();
+        assert_eq!(preset.input_gain_db, -3.0);
+    }
+
+    #[test]
+    fn rejects_unsupported_schema() {
+        let text = "schema_version = 2\n[pitch]\nsemitones = 3.0\n";
+        assert!(parse(text).is_err());
+    }
+
+    #[test]
+    fn rejects_missing_schema() {
+        assert!(parse("[pitch]\nsemitones = 3.0\n").is_err());
+    }
+}

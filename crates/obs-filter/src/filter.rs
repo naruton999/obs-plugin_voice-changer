@@ -1,14 +1,15 @@
 use std::ffi::{c_char, c_void};
 use std::ptr;
 use std::slice;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use vc_core::{Params, VoiceChanger};
 
-use crate::ffi::{
-    self, ObsAudioData, ObsAudioInfo, ObsData, ObsProperties, ObsSource, ObsSourceInfo,
-};
+use crate::ffi::{self, ObsAudioData, ObsAudioInfo, ObsData, ObsSource, ObsSourceInfo};
 use crate::guard;
 use crate::params::AtomicParams;
+use crate::preset::Preset;
+use crate::ui;
 
 /// OBS uses 1024 frames (`AUDIO_OUTPUT_FRAMES`). Leave room for larger blocks;
 /// `VoiceChanger::process` splits anything above this.
@@ -22,10 +23,14 @@ enum Layout {
     StereoDifferent,
 }
 
-struct FilterData {
+pub(crate) struct FilterData {
     chains: [VoiceChanger; 2],
-    params: AtomicParams,
+    pub(crate) params: AtomicParams,
     last_layout: Layout,
+    pub(crate) source: *mut ObsSource,
+    pub(crate) sample_rate: f32,
+    pub(crate) preset: Option<Preset>,
+    pub(crate) latency: AtomicU64,
 }
 
 pub(crate) fn source_info() -> ObsSourceInfo {
@@ -37,9 +42,9 @@ pub(crate) fn source_info() -> ObsSourceInfo {
     info.get_name = Some(get_name);
     info.create = Some(create);
     info.destroy = Some(destroy);
-    info.get_defaults = Some(get_defaults);
-    info.get_properties = Some(get_properties);
-    info.update = Some(update);
+    info.get_defaults = Some(ui::get_defaults);
+    info.get_properties = Some(ui::get_properties);
+    info.update = Some(ui::update);
     info.filter_audio = Some(filter_audio);
     info
 }
@@ -48,10 +53,11 @@ unsafe extern "C" fn get_name(_type_data: *mut c_void) -> *const c_char {
     c"ボイスチェンジャー".as_ptr()
 }
 
-unsafe extern "C" fn create(_settings: *mut ObsData, _source: *mut ObsSource) -> *mut c_void {
+unsafe extern "C" fn create(_settings: *mut ObsData, source: *mut ObsSource) -> *mut c_void {
     guard(ptr::null_mut(), || {
         let sample_rate = audio_sample_rate();
         let params = Params::default();
+        let latency = estimated_latency(sample_rate, &params);
         Box::into_raw(Box::new(FilterData {
             chains: [
                 VoiceChanger::new(sample_rate, MAX_BLOCK_FRAMES),
@@ -59,6 +65,10 @@ unsafe extern "C" fn create(_settings: *mut ObsData, _source: *mut ObsSource) ->
             ],
             params: AtomicParams::new(params),
             last_layout: Layout::Mono,
+            source,
+            sample_rate,
+            preset: ui::load_preset(),
+            latency: AtomicU64::new(latency as u64),
         }))
         .cast::<c_void>()
     })
@@ -69,23 +79,6 @@ unsafe extern "C" fn destroy(data: *mut c_void) {
         if !data.is_null() {
             drop(Box::from_raw(data.cast::<FilterData>()));
         }
-    });
-}
-
-unsafe extern "C" fn get_defaults(_settings: *mut ObsData) {}
-
-unsafe extern "C" fn get_properties(_data: *mut c_void) -> *mut ObsProperties {
-    ptr::null_mut()
-}
-
-unsafe extern "C" fn update(data: *mut c_void, _settings: *mut ObsData) {
-    guard((), || {
-        if data.is_null() {
-            return;
-        }
-        let filter = unsafe { &*data.cast::<FilterData>() };
-        // No properties yet; keep the chain on the defaults until the UI work.
-        filter.params.store(Params::default());
     });
 }
 
@@ -101,8 +94,15 @@ unsafe extern "C" fn filter_audio(
         let filter = unsafe { &mut *data.cast::<FilterData>() };
         let audio_ref = unsafe { &mut *audio };
         process(filter, audio_ref);
+        filter
+            .latency
+            .store(filter.chains[0].latency_samples() as u64, Ordering::Relaxed);
         audio
     })
+}
+
+fn estimated_latency(sample_rate: f32, params: &Params) -> usize {
+    vc_core::estimated_latency_samples(sample_rate, params)
 }
 
 fn audio_sample_rate() -> f32 {
