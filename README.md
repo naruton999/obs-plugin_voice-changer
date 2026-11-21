@@ -83,11 +83,11 @@ cargo build -p obs-filter --release
 ./build-aux/package-macos.sh
 ```
 
-`dist/obs-plugin_voice_changer.plugin` が生成される（ad-hoc 署名済み）。
+`dist/obs-plugin_voice-changer.plugin` が生成される（ad-hoc 署名済み）。
 
 #### 配置
 
-`dist/obs-plugin_voice_changer.plugin` を
+`dist/obs-plugin_voice-changer.plugin` を
 `~/Library/Application Support/obs-studio/plugins/` にコピーし、OBS を再起動する。
 
 ### Windows（x64）

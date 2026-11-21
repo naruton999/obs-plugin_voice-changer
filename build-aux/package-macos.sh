@@ -19,7 +19,7 @@ case "$CONFIG" in
     ;;
 esac
 
-OUT="$ROOT/dist/obs-plugin_voice_changer.plugin"
+OUT="$ROOT/dist/obs-plugin_voice-changer.plugin"
 LIB="$ROOT/target/$TARGET_DIR/libobs_filter.dylib"
 
 (
