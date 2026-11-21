@@ -1,0 +1,34 @@
+schema_version = 1
+name = "migrated-female"
+description = "現在のボイチェン（ピッチ +12 / フォルマント +4.4）の近似"
+created = "2026-11-21"
+
+[input]
+gain_db = 0.0
+hpf_hz = 100.0
+
+[gate]
+enabled = false
+threshold_db = -45.0
+ratio = 4.0
+attack_ms = 5.0
+release_ms = 120.0
+hold_ms = 40.0
+
+[pitch]
+semitones = 12.0
+
+[formant]
+enabled = true
+semitones = 4.4
+
+[output]
+gain_db = 2.0
+
+# 本プラグインでは適用しない（OBS 標準 EQ/コンプ用の参考値）
+[reference]
+low_shelf = { freq = 180.0, gain_db = -4.0 }
+peak = { freq = 3000.0, q = 1.0, gain_db = -2.0 }
+high_shelf = { freq = 7000.0, gain_db = 1.5 }
+lowpass_hz = 16000.0
+comp = { threshold_db = -18.0, ratio = 3.0, attack_ms = 8.0, release_ms = 150.0, makeup_db = 2.0 }

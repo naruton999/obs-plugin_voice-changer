@@ -116,6 +116,7 @@ unsafe extern "C" {
 
     pub fn obs_data_get_double(data: *mut ObsData, name: *const c_char) -> f64;
     pub fn obs_data_get_bool(data: *mut ObsData, name: *const c_char) -> bool;
+    pub fn obs_data_get_string(data: *mut ObsData, name: *const c_char) -> *const c_char;
     pub fn obs_data_set_double(data: *mut ObsData, name: *const c_char, value: f64);
     pub fn obs_data_set_bool(data: *mut ObsData, name: *const c_char, value: bool);
     pub fn obs_data_set_string(data: *mut ObsData, name: *const c_char, value: *const c_char);
@@ -177,8 +178,7 @@ unsafe extern "C" {
     pub fn obs_source_get_settings(source: *const ObsSource) -> *mut ObsData;
     pub fn obs_source_update(source: *mut ObsSource, settings: *mut ObsData);
 
-    pub fn obs_find_module_file(module: *mut c_void, file: *const c_char) -> *mut c_char;
-    pub fn bfree(ptr: *mut c_void);
+    pub fn obs_get_module_data_path(module: *mut c_void) -> *const c_char;
 }
 
 #[cfg(test)]

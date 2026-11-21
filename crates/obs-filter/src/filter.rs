@@ -8,7 +8,7 @@ use vc_core::{Params, VoiceChanger};
 use crate::ffi::{self, ObsAudioData, ObsAudioInfo, ObsData, ObsSource, ObsSourceInfo};
 use crate::guard;
 use crate::params::AtomicParams;
-use crate::preset::Preset;
+use crate::preset::PresetEntry;
 use crate::ui;
 
 /// OBS uses 1024 frames (`AUDIO_OUTPUT_FRAMES`). Leave room for larger blocks;
@@ -29,7 +29,7 @@ pub(crate) struct FilterData {
     last_layout: Layout,
     pub(crate) source: *mut ObsSource,
     pub(crate) sample_rate: f32,
-    pub(crate) preset: Option<Preset>,
+    pub(crate) presets: Vec<PresetEntry>,
     pub(crate) latency: AtomicU64,
 }
 
@@ -67,7 +67,7 @@ unsafe extern "C" fn create(_settings: *mut ObsData, source: *mut ObsSource) -> 
             last_layout: Layout::Mono,
             source,
             sample_rate,
-            preset: ui::load_preset(),
+            presets: Vec::new(),
             latency: AtomicU64::new(latency as u64),
         }))
         .cast::<c_void>()

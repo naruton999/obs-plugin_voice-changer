@@ -41,6 +41,12 @@ impl Default for Preset {
     }
 }
 
+#[cfg(not(test))]
+pub(crate) struct PresetEntry {
+    pub file: String,
+    pub preset: Preset,
+}
+
 pub(crate) fn parse(text: &str) -> Result<Preset, String> {
     let mut preset = Preset::default();
     let mut version = None;
@@ -126,6 +132,17 @@ mod tests {
         assert_eq!(preset.pitch_semitones, 3.5);
         assert!(preset.formant_enabled);
         assert_eq!(preset.formant_semitones, 2.5);
+    }
+
+    #[test]
+    fn parses_the_migrated_preset() {
+        let preset = parse(include_str!("../../../presets/migrated-female.toml")).unwrap();
+        assert_eq!(preset.input_gain_db, 0.0);
+        assert_eq!(preset.hpf_hz, 100.0);
+        assert_eq!(preset.pitch_semitones, 12.0);
+        assert!(preset.formant_enabled);
+        assert_eq!(preset.formant_semitones, 4.4);
+        assert_eq!(preset.output_gain_db, 2.0);
     }
 
     #[test]

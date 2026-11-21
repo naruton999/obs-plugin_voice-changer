@@ -7,7 +7,7 @@ use vc_core::{Params, estimated_latency_samples};
 use crate::ffi::{self, ObsData, ObsProperties, ObsProperty};
 use crate::filter::FilterData;
 use crate::guard;
-use crate::preset::Preset;
+use crate::preset::{Preset, PresetEntry};
 
 pub(crate) unsafe extern "C" fn get_defaults(settings: *mut ObsData) {
     guard((), || {
@@ -103,22 +103,27 @@ pub(crate) unsafe extern "C" fn update(data: *mut c_void, settings: *mut ObsData
 
 pub(crate) unsafe extern "C" fn get_properties(data: *mut c_void) -> *mut ObsProperties {
     guard(ptr::null_mut(), || {
-        let (latency, preset_available, sample_rate, independent) = if data.is_null() {
+        let (latency, sample_rate, independent, preset_names) = if data.is_null() {
             let params = Params::default();
             (
                 estimated_latency_samples(48_000.0, &params),
-                true,
                 48_000.0,
                 params.formant_independent,
+                Vec::new(),
             )
         } else {
-            let filter = unsafe { &*data.cast::<FilterData>() };
+            let filter = unsafe { &mut *data.cast::<FilterData>() };
+            filter.presets = load_presets();
             let params = filter.params.load();
             (
                 filter.latency.load(Ordering::Relaxed) as usize,
-                filter.preset.is_some(),
                 filter.sample_rate,
                 params.formant_independent,
+                filter
+                    .presets
+                    .iter()
+                    .map(|entry| entry.file.clone())
+                    .collect::<Vec<_>>(),
             )
         };
 
@@ -136,11 +141,11 @@ pub(crate) unsafe extern "C" fn get_properties(data: *mut c_void) -> *mut ObsPro
                 ffi::OBS_COMBO_FORMAT_STRING,
             );
             if !list.is_null() {
-                ffi::obs_property_list_add_string(
-                    list,
-                    c"sharp-female".as_ptr(),
-                    c"sharp-female".as_ptr(),
-                );
+                for name in &preset_names {
+                    if let Ok(cname) = CString::new(name.as_str()) {
+                        ffi::obs_property_list_add_string(list, cname.as_ptr(), cname.as_ptr());
+                    }
+                }
             }
             ffi::obs_properties_add_button(
                 props,
@@ -148,7 +153,7 @@ pub(crate) unsafe extern "C" fn get_properties(data: *mut c_void) -> *mut ObsPro
                 c"プリセットを適用".as_ptr(),
                 Some(apply_preset),
             );
-            if !preset_available {
+            if preset_names.is_empty() {
                 ffi::obs_properties_add_text(
                     props,
                     c"preset_error".as_ptr(),
@@ -349,14 +354,18 @@ unsafe extern "C" fn apply_preset(
             return false;
         }
 
-        let (source, preset) = {
+        let (source, presets) = {
             let filter = unsafe { &*data.cast::<FilterData>() };
-            (filter.source, filter.preset)
+            (
+                filter.source,
+                filter
+                    .presets
+                    .iter()
+                    .map(|entry| (entry.file.clone(), entry.preset))
+                    .collect::<Vec<_>>(),
+            )
         };
-        let Some(preset) = preset else {
-            return false;
-        };
-        if source.is_null() {
+        if source.is_null() || presets.is_empty() {
             return false;
         }
 
@@ -364,6 +373,24 @@ unsafe extern "C" fn apply_preset(
         if settings.is_null() {
             return false;
         }
+
+        let selected_ptr = unsafe { ffi::obs_data_get_string(settings, c"preset".as_ptr()) };
+        let selected = if selected_ptr.is_null() {
+            String::new()
+        } else {
+            unsafe { CStr::from_ptr(selected_ptr) }
+                .to_string_lossy()
+                .into_owned()
+        };
+        let Some((file, preset)) = presets
+            .iter()
+            .find(|(name, _)| name == &selected)
+            .cloned()
+            .or_else(|| presets.first().cloned())
+        else {
+            unsafe { ffi::obs_data_release(settings) };
+            return false;
+        };
 
         unsafe {
             ffi::obs_data_set_double(
@@ -419,7 +446,9 @@ unsafe extern "C" fn apply_preset(
                 preset.output_gain_db as f64,
             );
             ffi::obs_data_set_bool(settings, c"bypass".as_ptr(), false);
-            ffi::obs_data_set_string(settings, c"preset".as_ptr(), c"sharp-female".as_ptr());
+            if let Ok(cfile) = CString::new(file.as_str()) {
+                ffi::obs_data_set_string(settings, c"preset".as_ptr(), cfile.as_ptr());
+            }
 
             ffi::obs_source_update(source, settings);
             ffi::obs_data_release(settings);
@@ -429,24 +458,43 @@ unsafe extern "C" fn apply_preset(
     })
 }
 
-pub(crate) fn load_preset() -> Option<Preset> {
-    let path = unsafe {
-        ffi::obs_find_module_file(
-            crate::module::obs_current_module(),
-            c"presets/sharp-female.toml".as_ptr(),
-        )
-    };
-    if path.is_null() {
-        return None;
+pub(crate) fn load_presets() -> Vec<PresetEntry> {
+    let data_path = unsafe { ffi::obs_get_module_data_path(crate::module::obs_current_module()) };
+    if data_path.is_null() {
+        return Vec::new();
     }
 
-    let text = unsafe {
-        let path_str = CStr::from_ptr(path).to_string_lossy().into_owned();
-        ffi::bfree(path.cast());
-        std::fs::read_to_string(path_str).ok()?
+    let data_path = unsafe { CStr::from_ptr(data_path) }
+        .to_string_lossy()
+        .into_owned();
+    let dir = std::path::Path::new(&data_path).join("presets");
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
     };
 
-    crate::preset::parse(&text).ok()
+    let mut presets = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("toml") {
+            continue;
+        }
+        let Some(file) = path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .map(str::to_owned)
+        else {
+            continue;
+        };
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let Ok(preset) = crate::preset::parse(&text) else {
+            continue;
+        };
+        presets.push(PresetEntry { file, preset });
+    }
+    presets.sort_by(|a, b| a.file.cmp(&b.file));
+    presets
 }
 
 unsafe fn read_params(settings: *mut ObsData) -> Params {
