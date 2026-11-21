@@ -146,13 +146,17 @@ impl VoiceChanger {
             params.gate_hold_ms,
         );
         self.pitch.set_semitones(params.pitch_semitones);
-        let formant_semitones = if params.formant_independent {
-            params.formant_semitones
+        // The pitch stage shifts formants along with pitch. The formant stage
+        // receives the difference between the desired total formant shift and
+        // the pitch-induced shift.
+        let formant_target = if params.formant_independent {
+            params.formant_semitones.clamp(-7.0, 7.0)
         } else {
             params.pitch_semitones
         };
+        let formant_stage = formant_target - params.pitch_semitones;
         self.formant
-            .set_params(params.formant_enabled, formant_semitones);
+            .set_params(params.formant_enabled, formant_stage);
         self.output_gain.set_gain_db(params.output_gain_db);
         self.bypass_mix
             .set_target(if params.bypass { 1.0 } else { 0.0 });
@@ -235,5 +239,31 @@ fn flush_denormals(buf: &mut [f32]) {
         if sample.abs() < 1e-30 {
             *sample = 0.0;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn independent_formant_compensates_pitch() {
+        let mut chain = VoiceChanger::new(48_000.0, 2048);
+        chain.set_params(Params {
+            pitch_semitones: 12.0,
+            formant_independent: true,
+            formant_semitones: 4.4,
+            ..Params::default()
+        });
+        chain.process(&mut [0.0; 2048]);
+        assert!((chain.formant.target_semitones() - (-7.6)).abs() < 1e-4);
+
+        chain.set_params(Params {
+            pitch_semitones: 12.0,
+            formant_independent: false,
+            ..Params::default()
+        });
+        chain.process(&mut [0.0; 2048]);
+        assert!(chain.formant.target_semitones().abs() < 1e-4);
     }
 }

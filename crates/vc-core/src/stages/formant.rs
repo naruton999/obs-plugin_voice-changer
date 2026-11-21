@@ -10,8 +10,9 @@ const FFT_SIZE: usize = 1024;
 const HOP: usize = 256;
 /// Parameter smoothing time.
 const SMOOTHING_SECONDS: f64 = 0.050;
-/// Maximum independent formant shift.
-const MAX_SHIFT_SEMITONES: f32 = 7.0;
+/// Internal range. The chain clamps the desired total formant shift to ±7
+/// semitones, but the stage may need to cancel a large pitch-induced shift.
+const MAX_SHIFT_SEMITONES: f32 = 36.0;
 /// Clamp the spectral gain to avoid boosting near-silent bins excessively.
 const GAIN_MIN: f32 = 0.25;
 const GAIN_MAX: f32 = 4.0;
@@ -214,6 +215,11 @@ impl FormantStage {
 
     pub(crate) fn latency_samples(&self) -> usize {
         if self.enabled { FFT_SIZE } else { 0 }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn target_semitones(&self) -> f32 {
+        self.semitones.target()
     }
 
     fn process_frame(&mut self, frame_start: u64) {
