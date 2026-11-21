@@ -148,7 +148,7 @@ C:\ProgramData\obs-studio\plugins\obs-plugin_voice-changer\
 #### 注意
 
 - 署名なしのため、SmartScreen の警告が出る場合がある。zip のプロパティで「ブロックの解除」を行う。
-- CI は GitHub Actions の手動実行（`Windows Build`）で、artifact から zip を取得する。
+- CI は GitHub Actions の手動実行（`Windows Build` / `macOS Build`）。artifact 自体が zip なので、ダウンロードして 1 回展開すると `obs-plugin_voice-changer/`（macOS は `.plugin`）が入っている。
 
 ## ライセンス
 

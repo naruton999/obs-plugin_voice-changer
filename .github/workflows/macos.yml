@@ -41,12 +41,9 @@ jobs:
       - name: Check architecture
         run: file dist/obs-plugin_voice-changer.plugin/Contents/MacOS/obs-plugin_voice-changer | grep arm64
 
-      - name: Create zip
-        run: ditto -c -k --sequesterRsrc --keepParent dist/obs-plugin_voice-changer.plugin dist/obs-plugin_voice-changer-macos-arm64.zip
-
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: obs-plugin_voice-changer-macos-arm64
-          path: dist/obs-plugin_voice-changer-macos-arm64.zip
+          path: dist/obs-plugin_voice-changer.plugin
           if-no-files-found: error

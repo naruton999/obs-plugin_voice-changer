@@ -45,5 +45,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: obs-plugin_voice-changer-windows-x64
-          path: dist/obs-plugin_voice-changer-windows-x64.zip
+          path: dist/windows/
           if-no-files-found: error
