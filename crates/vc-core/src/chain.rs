@@ -54,7 +54,7 @@ impl VoiceChanger {
             params: Params::default(),
             input_gain: GainStage::new(param_ramp),
             hpf: HighPassStage::new(sample_rate, param_ramp),
-            gate: GateStage::new(),
+            gate: GateStage::new(sample_rate),
             pitch: PitchStage::new(sample_rate, max_block_size),
             formant: FormantStage::new(sample_rate, max_block_size),
             output_gain: GainStage::new(param_ramp),
