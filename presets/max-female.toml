@@ -1,0 +1,49 @@
+schema_version = 1
+name = "max-female"
+description = "限界まで女性寄り（ピッチ +12 / フォルマント +10）"
+created = "2026-11-21"
+
+[input]
+gain_db = 0.0
+hpf_hz = 110.0
+
+[gate]
+enabled = false
+threshold_db = -45.0
+ratio = 4.0
+attack_ms = 5.0
+release_ms = 120.0
+hold_ms = 40.0
+
+[pitch]
+semitones = 12.0
+phase_vocoder = true
+
+[formant]
+enabled = true
+independent = true
+semitones = 10.0
+
+[tone]
+low_db = -3.0
+mid_db = 2.0
+high_db = 2.0
+
+[compressor]
+enabled = true
+threshold_db = -20.0
+ratio = 2.5
+attack_ms = 10.0
+release_ms = 180.0
+makeup_db = 1.0
+
+[output]
+gain_db = 2.0
+
+# 本プラグインでは適用しない（OBS 標準 EQ/コンプ用の参考値）
+[reference]
+low_shelf = { freq = 250.0, gain_db = -3.0 }
+peak = { freq = 2500.0, q = 1.0, gain_db = 2.0 }
+high_shelf = { freq = 5000.0, gain_db = 2.0 }
+lowpass_hz = 16000.0
+comp = { threshold_db = -20.0, ratio = 2.5, attack_ms = 10.0, release_ms = 180.0, makeup_db = 1.0 }

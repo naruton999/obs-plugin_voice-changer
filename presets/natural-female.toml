@@ -17,7 +17,7 @@ hold_ms = 40.0
 
 [pitch]
 semitones = 11.0
-phase_vocoder = false
+phase_vocoder = true
 
 [formant]
 enabled = true
@@ -38,7 +38,7 @@ release_ms = 180.0
 makeup_db = 1.0
 
 [output]
-gain_db = 0.0
+gain_db = 2.0
 
 # 本プラグインでは適用しない（OBS 標準 EQ/コンプ用の参考値）
 [reference]

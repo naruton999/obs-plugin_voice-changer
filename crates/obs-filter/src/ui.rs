@@ -14,7 +14,7 @@ const LOG_INFO: c_int = 300;
 
 /// Presets compiled into the plugin so the list is never empty, even when the
 /// data folder or preset files are missing.
-const BUILTIN_PRESETS: [(&str, &str); 4] = [
+const BUILTIN_PRESETS: [(&str, &str); 5] = [
     (
         "sharp-female",
         include_str!("../../../presets/sharp-female.toml"),
@@ -30,6 +30,10 @@ const BUILTIN_PRESETS: [(&str, &str); 4] = [
     (
         "bright-female",
         include_str!("../../../presets/bright-female.toml"),
+    ),
+    (
+        "max-female",
+        include_str!("../../../presets/max-female.toml"),
     ),
 ];
 
@@ -270,7 +274,7 @@ pub(crate) unsafe extern "C" fn get_properties(data: *mut c_void) -> *mut ObsPro
             ffi::obs_properties_add_bool(
                 props,
                 c"phase_vocoder".as_ptr(),
-                c"フェーズボコーダ（実験的）".as_ptr(),
+                c"高品質モード（フェーズボコーダ）".as_ptr(),
             );
 
             let formant = ffi::obs_properties_add_float_slider(

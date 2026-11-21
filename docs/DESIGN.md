@@ -60,7 +60,7 @@ OBS 音声スレッド
         │  planar f32 / 可変フレーム数
         ▼
   ┌──────────────── vc-core ────────────────┐
-  │ InputGain → HPF → Gate → Pitch(WSOLA)   │
+  │ InputGain → HPF → Gate → Pitch(PV/WSOLA)│
   │           → Formant(任意) → OutGain     │
   │           → SoftClip                    │
   └─────────────────────────────────────────┘
@@ -151,7 +151,7 @@ Cargo の cdylib 出力名はアンダースコア区切りになるため、パ
 ### 4.1 処理チェーン
 
 ```
-in ─► InputGain ─► HPF ─► Gate(既定 OFF) ─► Pitch(WSOLA)
+in ─► InputGain ─► HPF ─► Gate(既定 OFF) ─► Pitch(PV 既定 / WSOLA)
    ─► Formant(任意) ─► OutGain ─► SoftClip ─► out
 ```
 
@@ -179,7 +179,11 @@ in ─► InputGain ─► HPF ─► Gate(既定 OFF) ─► Pitch(WSOLA)
 | OutGain | 出力ゲイン | -24〜+24 dB | 0 dB |
 | SoftClip | 閾値 | -1 dBFS 固定（ルックアヘッドなし） | 固定 |
 
-### 4.3 Pitch（WSOLA）
+### 4.3 Pitch（位相ロック付きフェーズボコーダ / WSOLA）
+
+既定は位相ロック付きフェーズボコーダ（FFT 2048 点 / hop 512 / 同一 STFT 内で
+フォルマント包絡も伸縮 / トランジェントで位相リセット）。低遅延が必要な場合に
+WSOLA へ切り替えられる。下表は WSOLA の値。
 
 | 項目 | 値 |
 |---|---|
@@ -200,7 +204,7 @@ in ─► InputGain ─► HPF ─► Gate(既定 OFF) ─► Pitch(WSOLA)
 | 位相 | WSOLA 出力の位相を引き継ぐ（位相復元はしない） |
 | OFF 時 | 完全にスキップ（遅延 +0ms） |
 | ON 時 | 遅延 +21ms |
-| 過大シフト | ±7 半音超は自動クランプし、UI に表示する |
+| 過大シフト | ±12 半音超は自動クランプする |
 | 方針 | 品質より破綻の少なさを優先 |
 
 フォルマントは既定でピッチに連動する。
@@ -218,7 +222,8 @@ in ─► InputGain ─► HPF ─► Gate(既定 OFF) ─► Pitch(WSOLA)
 
 | 構成 | 内部遅延 |
 |---|---|
-| ピッチのみ（フォルマント OFF） | 15〜25ms |
+| 高品質モード（PV、既定、フォルマント込み） | 43ms |
+| ピッチのみ（WSOLA、フォルマント OFF） | 15〜25ms |
 | ＋フォルマント ON | +21ms |
 | ＋OBS の音声ブロック | 約 21ms |
 | **合計の目安** | **40〜70ms** |

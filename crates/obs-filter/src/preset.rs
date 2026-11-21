@@ -49,7 +49,7 @@ impl Default for Preset {
             gate_release_ms: 120.0,
             gate_hold_ms: 40.0,
             pitch_semitones: 0.0,
-            phase_vocoder: false,
+            phase_vocoder: true,
             formant_enabled: true,
             formant_independent: true,
             formant_semitones: 0.0,
@@ -175,7 +175,7 @@ mod tests {
         assert_eq!(preset.hpf_hz, 80.0);
         assert!(!preset.gate_enabled);
         assert_eq!(preset.pitch_semitones, 3.5);
-        assert!(!preset.phase_vocoder);
+        assert!(preset.phase_vocoder);
         assert!(preset.formant_enabled);
         assert!(preset.formant_independent);
         assert_eq!(preset.formant_semitones, 2.5);
@@ -205,6 +205,19 @@ mod tests {
         assert_eq!(preset.compressor_release_ms, 150.0);
         assert_eq!(preset.compressor_makeup_db, 2.0);
         assert_eq!(preset.output_gain_db, 2.0);
+    }
+
+    #[test]
+    fn parses_all_bundled_presets() {
+        for text in [
+            include_str!("../../../presets/sharp-female.toml"),
+            include_str!("../../../presets/migrated-female.toml"),
+            include_str!("../../../presets/natural-female.toml"),
+            include_str!("../../../presets/bright-female.toml"),
+            include_str!("../../../presets/max-female.toml"),
+        ] {
+            parse(text).unwrap();
+        }
     }
 
     #[test]
