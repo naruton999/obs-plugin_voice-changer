@@ -1,8 +1,6 @@
 use crate::params::Params;
 
 const PITCH_WINDOW_SECONDS: f64 = 0.040;
-const PITCH_SEARCH_SECONDS: f64 = 0.010;
-const PITCH_CORRELATION_SECONDS: f64 = 0.005;
 const FORMANT_LATENCY: usize = 1024;
 const PHASE_VOCODER_LATENCY: usize = 2048;
 
@@ -20,13 +18,7 @@ pub fn estimated_latency_samples(sample_rate: f32, params: &Params) -> usize {
         48_000.0
     };
 
-    let hop = (PITCH_WINDOW_SECONDS * 0.25 * sample_rate as f64)
-        .round()
-        .max(1.0) as usize;
-    let search = (PITCH_SEARCH_SECONDS * sample_rate as f64).round().max(1.0);
-    let correlation = (PITCH_CORRELATION_SECONDS * sample_rate as f64)
-        .round()
-        .max(1.0);
+    let window = (PITCH_WINDOW_SECONDS * sample_rate as f64).round().max(1.0) as usize;
 
     let formant_target = if params.formant_independent {
         params.formant_semitones.clamp(-12.0, 12.0)
@@ -48,13 +40,12 @@ pub fn estimated_latency_samples(sample_rate: f32, params: &Params) -> usize {
         };
         pitch + formant
     } else {
-        let pitch = if params.pitch_semitones == 0.0 {
-            hop
+        // The WSOLA path has a fixed window look-ahead, independent of the
+        // pitch ratio, and is bypassed entirely at 0 semitones.
+        let pitch = if params.pitch_semitones.abs() < 1e-6 {
+            0
         } else {
-            let ratio = 2f64.powf(params.pitch_semitones as f64 / 12.0);
-            let chunk = (4.0 * ratio - 3.0) * hop as f64 + search;
-            let search_need = search + correlation * ratio;
-            chunk.max(search_need).max(0.0).ceil() as usize + 2
+            window
         };
         pitch + formant
     }
@@ -70,17 +61,17 @@ mod tests {
     }
 
     #[test]
-    fn wsola_formant_off_removes_its_latency() {
+    fn wsola_idle_has_no_latency() {
         let params = Params {
             phase_vocoder: false,
             formant_enabled: false,
             ..Params::default()
         };
-        assert_eq!(estimated_latency_samples(48_000.0, &params), 480);
+        assert_eq!(estimated_latency_samples(48_000.0, &params), 0);
     }
 
     #[test]
-    fn wsola_higher_pitch_adds_latency() {
+    fn wsola_latency_is_independent_of_pitch() {
         let low = Params {
             phase_vocoder: false,
             pitch_semitones: 3.5,
@@ -93,8 +84,10 @@ mod tests {
             formant_enabled: false,
             ..Params::default()
         };
-        assert!(
-            estimated_latency_samples(48_000.0, &high) > estimated_latency_samples(48_000.0, &low)
+        assert_eq!(estimated_latency_samples(48_000.0, &low), 1_920);
+        assert_eq!(
+            estimated_latency_samples(48_000.0, &high),
+            estimated_latency_samples(48_000.0, &low)
         );
     }
 

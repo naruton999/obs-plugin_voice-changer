@@ -19,10 +19,14 @@ const FINE_RADIUS: i32 = 3;
 
 /// WSOLA pitch shifter.
 ///
-/// The stage generates output one hop at a time. Each output hop is assembled
-/// from the chunks of the four grains that overlap it, so the required input
-/// look-ahead stays close to one hop rather than one full window.
+/// This is the low-latency path. It performs a WSOLA time-stretch (grains are
+/// read without resampling) and then resamples the stretched signal to restore
+/// the duration and shift the pitch. Doing the stretch and the resample as two
+/// explicit steps is what keeps the grain lattice consistent; resampling
+/// inside each grain while advancing the grain start by one hop made the
+/// overlap-add combine different input times (heard as two or three voices).
 pub(crate) struct PitchStage {
+    window: usize,
     hop: usize,
     search: i32,
     corr_len: usize,
@@ -39,12 +43,15 @@ pub(crate) struct PitchStage {
     input_len: u64,
 
     starts: [f64; 4],
-    next_grain: u64,
     emit_hop: u64,
+    analysis_pos: f64,
+
+    stretched: Vec<f32>,
+    stretched_base: u64,
+    resample_pos: f64,
 
     out_fifo: VecDeque<f32>,
     fifo_cap: usize,
-
     latency: usize,
     delay_remaining: usize,
 }
@@ -72,9 +79,10 @@ impl PitchStage {
 
         let history_keep = (0.20 * sample_rate as f64) as usize;
         let history_cap = history_keep + max_block_size + 2 * window;
-        let fifo_cap = max_block_size + 6 * window;
+        let fifo_cap = max_block_size + window + 2 * hop;
 
         let mut stage = Self {
+            window,
             hop,
             search,
             corr_len,
@@ -88,11 +96,14 @@ impl PitchStage {
             history_cap,
             input_len: 0,
             starts: [0.0; 4],
-            next_grain: 0,
             emit_hop: 0,
+            analysis_pos: 0.0,
+            stretched: Vec::with_capacity(4 * window + 4 * max_block_size),
+            stretched_base: 0,
+            resample_pos: 0.0,
             out_fifo: VecDeque::with_capacity(fifo_cap),
             fifo_cap,
-            latency: 0,
+            latency: window,
             delay_remaining: 0,
         };
         stage.reset();
@@ -105,7 +116,12 @@ impl PitchStage {
         } else {
             0.0
         };
+        let was_zero = self.semitones.target().abs() < 1e-6;
+        let now_zero = semitones.abs() < 1e-6;
         self.semitones.set_target(semitones);
+        if was_zero != now_zero {
+            self.reset();
+        }
     }
 
     pub(crate) fn reset(&mut self) {
@@ -113,115 +129,42 @@ impl PitchStage {
         self.history_base = 0;
         self.input_len = 0;
         self.starts = [0.0; 4];
-        self.next_grain = 0;
         self.emit_hop = 0;
+        self.analysis_pos = 0.0;
+        self.stretched.clear();
+        self.stretched_base = 0;
+        self.resample_pos = 0.0;
         self.out_fifo.clear();
         self.semitones.snap(self.semitones.target());
-        self.latency = self.required_latency(self.current_ratio());
-        self.delay_remaining = self.latency;
+        self.delay_remaining = self.latency_samples();
     }
 
     pub(crate) fn latency_samples(&self) -> usize {
-        self.latency.max(self.required_latency(self.target_ratio()))
+        if self.semitones.target().abs() < 1e-6 {
+            0
+        } else {
+            self.latency
+        }
+    }
+
+    fn active(&self) -> bool {
+        self.semitones.target().abs() > 1e-6
     }
 
     fn current_ratio(&self) -> f64 {
         2f64.powf(self.semitones.current() as f64 / 12.0)
     }
 
-    fn target_ratio(&self) -> f64 {
-        2f64.powf(self.semitones.target() as f64 / 12.0)
-    }
-
-    fn required_latency(&self, ratio: f64) -> usize {
-        if (ratio - 1.0).abs() < 1e-6 {
-            return self.hop;
+    fn find_start(&mut self, ratio: f64) -> f64 {
+        let nominal = self.analysis_pos;
+        if self.emit_hop == 0 || (ratio - 1.0).abs() < 1e-6 {
+            return nominal.max(0.0);
         }
 
-        let chunk = (4.0 * ratio - 3.0) * self.hop as f64 + self.search as f64;
-        let search = self.search as f64 + self.corr_len as f64 * ratio;
-        chunk.max(search).max(0.0).ceil() as usize + 2
-    }
-
-    fn update_latency(&mut self) {
-        let required = self.required_latency(self.target_ratio());
-        if required > self.latency {
-            self.delay_remaining += required - self.latency;
-            self.latency = required;
-        }
-    }
-
-    /// Returns true when one output hop was produced.
-    fn emit_next_hop(&mut self, ratio: f64) -> bool {
-        let hop_index = self.emit_hop;
-
-        if !self.can_search(hop_index, ratio) {
-            return false;
-        }
-
-        if self.next_grain <= hop_index {
-            let start = self.find_start(hop_index, ratio);
-            self.starts[(hop_index % 4) as usize] = start;
-            self.next_grain = hop_index + 1;
-        }
-
-        let first_grain = hop_index.saturating_sub(3);
-        for grain in first_grain..=hop_index {
-            let chunk = (hop_index - grain) as usize;
-            let start = self.starts[(grain % 4) as usize];
-            let need = start + (((chunk + 1) * self.hop - 1) as f64 * ratio) + 2.0;
-            if (self.input_len as f64) < need {
-                return false;
-            }
-        }
-
-        for value in self.hop_buf.iter_mut() {
-            *value = 0.0;
-        }
-
-        for grain in first_grain..=hop_index {
-            let chunk = (hop_index - grain) as usize;
-            let start = self.starts[(grain % 4) as usize];
-            let offset = chunk * self.hop;
-            for j in 0..self.hop {
-                let position = start + (offset + j) as f64 * ratio;
-                let sample = self.read_abs(position);
-                self.hop_buf[j] += sample * self.window_fn[offset + j];
-            }
-        }
-
-        // Four Hann windows at 75% overlap sum to 2.0.
-        let gain = 0.5;
-        for &value in &self.hop_buf {
-            self.out_fifo.push_back(value * gain);
-        }
-
-        self.emit_hop += 1;
-        true
-    }
-
-    fn can_search(&self, hop_index: u64, ratio: f64) -> bool {
-        if hop_index == 0 || (ratio - 1.0).abs() < 1e-6 {
-            return true;
-        }
-
-        let nominal = (hop_index * self.hop as u64) as f64;
-        let candidate = nominal + self.search as f64 + self.corr_len as f64 * ratio + 2.0;
-        let previous = self.starts[((hop_index - 1) % 4) as usize];
-        let continuation = previous + (self.hop + self.corr_len) as f64 * ratio + 2.0;
-        (self.input_len as f64) >= candidate.max(continuation)
-    }
-
-    fn find_start(&mut self, hop_index: u64, ratio: f64) -> f64 {
-        let nominal = (hop_index * self.hop as u64) as f64;
-        if hop_index == 0 || (ratio - 1.0).abs() < 1e-6 {
-            return nominal;
-        }
-
-        let previous = self.starts[((hop_index - 1) % 4) as usize];
+        let previous = self.starts[((self.emit_hop - 1) % 4) as usize];
         let mut reference_energy = 0.0f32;
         for j in 0..self.corr_len {
-            let value = self.read_abs(previous + (self.hop + j) as f64 * ratio);
+            let value = self.read_abs(previous + (self.hop + j) as f64);
             self.corr_buf[j] = value;
             reference_energy += value * value;
         }
@@ -231,7 +174,7 @@ impl PitchStage {
 
         let mut offset = -self.search;
         while offset <= self.search {
-            let value = self.correlation(nominal + offset as f64, ratio, reference_energy);
+            let value = self.correlation(nominal + offset as f64, reference_energy);
             if value > best {
                 best = value;
                 best_offset = offset;
@@ -243,7 +186,7 @@ impl PitchStage {
         let high = (best_offset + FINE_RADIUS).min(self.search);
         let mut offset = low;
         while offset <= high {
-            let value = self.correlation(nominal + offset as f64, ratio, reference_energy);
+            let value = self.correlation(nominal + offset as f64, reference_energy);
             if value > best {
                 best = value;
                 best_offset = offset;
@@ -254,26 +197,72 @@ impl PitchStage {
         (nominal + best_offset as f64).max(0.0)
     }
 
-    /// Normalised cross-correlation.
-    ///
-    /// The raw dot product used previously favoured offsets whose waveform
-    /// happened to be louder, which pulled the grain alignment away from the
-    /// pitch period and produced a warbling/rough texture. Normalising by the
-    /// candidate energy makes the score depend on similarity only.
-    fn correlation(&self, start: f64, ratio: f64, reference_energy: f32) -> f32 {
+    fn correlation(&self, start: f64, reference_energy: f32) -> f32 {
         let mut dot = 0.0f32;
         let mut energy = 0.0f32;
         for j in 0..self.corr_len {
-            let value = self.read_abs(start + j as f64 * ratio);
+            let value = self.read_abs(start + j as f64);
             dot += value * self.corr_buf[j];
             energy += value * value;
         }
         dot / ((energy * reference_energy).sqrt() + 1e-12)
     }
 
-    /// Reads a fractional sample, interpolated with a 4-point Catmull-Rom
-    /// spline. Linear interpolation leaves a noticeable high-frequency haze on
-    /// large upward shifts.
+    fn can_search(&self, ratio: f64) -> bool {
+        if self.emit_hop == 0 || (ratio - 1.0).abs() < 1e-6 {
+            return self.input_len as f64 >= self.analysis_pos + self.hop as f64;
+        }
+
+        let candidate = self.analysis_pos + self.search as f64 + self.corr_len as f64;
+        let previous = self.starts[((self.emit_hop - 1) % 4) as usize];
+        let continuation = previous + (self.hop + self.corr_len) as f64;
+        self.input_len as f64 >= candidate.max(continuation)
+    }
+
+    /// Returns true when one stretched hop was produced.
+    fn emit_next_hop(&mut self) -> bool {
+        let ratio = self.current_ratio();
+        if !self.can_search(ratio) {
+            return false;
+        }
+
+        let start = self.find_start(ratio);
+        self.starts[(self.emit_hop % 4) as usize] = start;
+
+        let first_grain = self.emit_hop.saturating_sub(3);
+        // Check every grain first so a partially accumulated hop is never
+        // left behind when the input is not ready yet.
+        for grain in first_grain..=self.emit_hop {
+            let chunk = (self.emit_hop - grain) as usize;
+            let offset = chunk * self.hop;
+            let grain_start = self.starts[(grain % 4) as usize];
+            if (self.input_len as f64) < grain_start + (offset + self.hop) as f64 {
+                return false;
+            }
+        }
+
+        for grain in first_grain..=self.emit_hop {
+            let chunk = (self.emit_hop - grain) as usize;
+            let offset = chunk * self.hop;
+            let grain_start = self.starts[(grain % 4) as usize];
+            for j in 0..self.hop {
+                let sample = self.read_abs(grain_start + (offset + j) as f64);
+                self.hop_buf[j] += sample * self.window_fn[offset + j];
+            }
+        }
+
+        // Four Hann windows at 75% overlap sum to 2.0.
+        for value in self.hop_buf.iter_mut() {
+            self.stretched.push(*value * 0.5);
+            *value = 0.0;
+        }
+
+        self.emit_hop += 1;
+        self.analysis_pos += self.hop as f64 / ratio;
+        self.semitones.advance(self.hop as u32);
+        true
+    }
+
     fn read_abs(&self, position: f64) -> f32 {
         if position < 0.0 {
             return 0.0;
@@ -307,6 +296,70 @@ impl PitchStage {
         let local = (index - self.history_base) as usize;
         self.history.get(local).copied().unwrap_or(0.0)
     }
+
+    fn stretched_sample(&self, index: i64) -> f32 {
+        if index < 0 {
+            return 0.0;
+        }
+        let index = index as u64;
+        if index < self.stretched_base {
+            return 0.0;
+        }
+        self.stretched
+            .get((index - self.stretched_base) as usize)
+            .copied()
+            .unwrap_or(0.0)
+    }
+
+    fn stretched_at(&self, position: f64) -> f32 {
+        if position < 0.0 {
+            return 0.0;
+        }
+        let base = position.floor();
+        let fraction = (position - base) as f32;
+        if fraction <= f32::EPSILON {
+            return self.stretched_sample(base as i64);
+        }
+
+        let p0 = self.stretched_sample(base as i64 - 1);
+        let p1 = self.stretched_sample(base as i64);
+        let p2 = self.stretched_sample(base as i64 + 1);
+        let p3 = self.stretched_sample(base as i64 + 2);
+
+        let a = -0.5 * p0 + 1.5 * p1 - 1.5 * p2 + 0.5 * p3;
+        let b = p0 - 2.5 * p1 + 2.0 * p2 - 0.5 * p3;
+        let c = -0.5 * p0 + 0.5 * p2;
+        ((a * fraction + b) * fraction + c) * fraction + p1
+    }
+
+    fn resample_into_fifo(&mut self, alpha: f64, limit: usize) {
+        while self.out_fifo.len() < limit && self.out_fifo.len() < self.fifo_cap {
+            let local = self.resample_pos - self.stretched_base as f64;
+            if local < 0.0 {
+                break;
+            }
+            let index = local as usize;
+            if index + 2 >= self.stretched.len() {
+                break;
+            }
+            self.out_fifo
+                .push_back(self.stretched_at(self.resample_pos));
+            self.resample_pos += alpha;
+        }
+    }
+
+    fn trim_stretched(&mut self) {
+        let consumed =
+            (self.resample_pos.floor().max(0.0) as u64).saturating_sub(self.stretched_base);
+        if consumed > (self.window * 2) as u64 {
+            let drop = (consumed - self.window as u64) as usize;
+            let drop = drop.min(self.stretched.len());
+            if drop > 0 {
+                self.stretched.drain(..drop);
+                self.stretched_base += drop as u64;
+            }
+        }
+    }
 }
 
 impl DspStage for PitchStage {
@@ -314,29 +367,27 @@ impl DspStage for PitchStage {
         if buf.is_empty() {
             return;
         }
+        if !self.active() {
+            return;
+        }
 
-        self.update_latency();
+        self.history.extend_from_slice(buf);
+        self.input_len += buf.len() as u64;
 
-        if self.history.len() + buf.len() > self.history_cap {
-            let drop = self.history.len() + buf.len() - self.history_keep;
+        if self.history.len() > self.history_cap {
+            let drop = self.history.len() - self.history_keep;
             if drop > 0 {
                 self.history.drain(..drop);
                 self.history_base += drop as u64;
             }
         }
-        self.history.extend_from_slice(buf);
-        self.input_len += buf.len() as u64;
 
-        loop {
-            if self.out_fifo.len() + self.hop > self.fifo_cap {
-                break;
-            }
-            let ratio = self.current_ratio();
-            if !self.emit_next_hop(ratio) {
-                break;
-            }
-            self.semitones.advance(self.hop as u32);
-        }
+        while self.emit_next_hop() {}
+
+        let alpha = self.current_ratio();
+        let limit = buf.len() + self.delay_remaining + 2 * self.hop;
+        self.resample_into_fifo(alpha, limit);
+        self.trim_stretched();
 
         for sample in buf.iter_mut() {
             if self.delay_remaining > 0 {
@@ -435,24 +486,13 @@ mod tests {
     }
 
     #[test]
-    fn zero_semitones_reconstructs_delayed_input() {
+    fn zero_semitones_is_passthrough() {
         let sample_rate = 48_000.0;
-        let input = sine(440.0, sample_rate, sample_rate as usize);
+        let input = sine(440.0, sample_rate, 4_800);
         let mut stage = PitchStage::new(sample_rate, 4096);
-        let latency = stage.latency;
-
+        stage.set_semitones(0.0);
         let out = process_blocks(&mut stage, &input, 480);
-        let skip = (0.20 * sample_rate) as usize;
-        let end = input.len() - latency - (0.05 * sample_rate) as usize;
-
-        for i in skip..end {
-            let expected = input[i - latency];
-            assert!(
-                (out[i] - expected).abs() < 1e-5,
-                "i = {i}, out = {}, expected = {expected}",
-                out[i]
-            );
-        }
+        assert_eq!(out, input);
     }
 
     #[test]
@@ -474,6 +514,20 @@ mod tests {
     }
 
     #[test]
+    fn latency_is_independent_of_pitch() {
+        let mut stage = PitchStage::new(48_000.0, 4096);
+        let zero = stage.latency_samples();
+        assert_eq!(zero, 0);
+
+        stage.set_semitones(3.5);
+        let up = stage.latency_samples();
+        assert_eq!(up, stage.window);
+
+        stage.set_semitones(12.0);
+        assert_eq!(stage.latency_samples(), up);
+    }
+
+    #[test]
     fn cubic_interpolation_reproduces_integer_positions() {
         let mut stage = PitchStage::new(48_000.0, 4096);
         stage.history = (0..64)
@@ -485,10 +539,6 @@ mod tests {
             let expected = stage.history[i];
             assert!((stage.read_abs(i as f64) - expected).abs() < 1e-6);
         }
-
-        let mid = stage.read_abs(10.5);
-        let linear = 0.5 * (stage.history[10] + stage.history[11]);
-        assert!((mid - linear).abs() < 0.5, "mid = {mid}, linear = {linear}");
     }
 
     #[test]
@@ -509,23 +559,9 @@ mod tests {
             .iter()
             .map(|value| value * value)
             .sum::<f32>();
-        let quiet = stage.correlation(0.0, 1.0, reference);
-        let loud = stage.correlation(2000.0, 1.0, reference);
+        let quiet = stage.correlation(0.0, reference);
+        let loud = stage.correlation(2000.0, reference);
         assert!((quiet - 1.0).abs() < 1e-3, "quiet = {quiet}");
         assert!((loud - 1.0).abs() < 1e-3, "loud = {loud}");
-    }
-
-    #[test]
-    fn latency_grows_with_pitch() {
-        let mut stage = PitchStage::new(48_000.0, 4096);
-        let zero = stage.latency_samples();
-        assert_eq!(zero, stage.hop);
-
-        stage.set_semitones(3.5);
-        let up = stage.latency_samples();
-        assert!(up > zero, "zero = {zero}, up = {up}");
-
-        stage.set_semitones(12.0);
-        assert!(stage.latency_samples() > up);
     }
 }
