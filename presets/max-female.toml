@@ -17,7 +17,7 @@ hold_ms = 40.0
 
 [pitch]
 semitones = 12.0
-phase_vocoder = true
+phase_vocoder = false
 
 [formant]
 enabled = true

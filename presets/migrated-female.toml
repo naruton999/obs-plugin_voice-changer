@@ -1,6 +1,6 @@
 schema_version = 1
 name = "migrated-female"
-description = "現在のボイチェン（ピッチ +12 / フォルマント +4.4）の近似"
+description = "standard-female と同設定（旧名・互換用）"
 created = "2026-11-21"
 
 [input]

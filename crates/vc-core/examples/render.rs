@@ -1,8 +1,12 @@
 //! Offline renderer used to audition the DSP chain against a WAV file.
 //!
 //! ```text
-//! cargo run -p vc-core --example render -- in.wav out.wav --pitch 11 --formant 6
+//! cargo run -p vc-core --example render -- in.wav out.wav --pitch 12 --formant 4.4
 //! ```
+//!
+//! WSOLA is the default pitch engine; pass `--pv` to audition the phase
+//! vocoder instead. The stereo input is processed as a single mid signal, the
+//! same way the plugin links near-identical channels.
 //!
 //! This is a development tool, not part of the OBS plugin.
 
@@ -70,7 +74,7 @@ fn params_from_args(args: &[String]) -> Params {
     let formant_independent = !args.iter().any(|arg| arg == "--formant-follow");
     Params {
         pitch_semitones: value(args, "--pitch", 0.0),
-        phase_vocoder: !args.iter().any(|arg| arg == "--wsola"),
+        phase_vocoder: args.iter().any(|arg| arg == "--pv"),
         formant_enabled: !args.iter().any(|arg| arg == "--formant-off"),
         formant_independent,
         formant_semitones: value(args, "--formant", 0.0),
