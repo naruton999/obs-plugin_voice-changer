@@ -12,6 +12,19 @@ use crate::preset::{Preset, PresetEntry};
 const LOG_WARNING: c_int = 200;
 const LOG_INFO: c_int = 300;
 
+/// Presets compiled into the plugin so the list is never empty, even when the
+/// data folder or preset files are missing.
+const BUILTIN_PRESETS: [(&str, &str); 2] = [
+    (
+        "sharp-female",
+        include_str!("../../../presets/sharp-female.toml"),
+    ),
+    (
+        "migrated-female",
+        include_str!("../../../presets/migrated-female.toml"),
+    ),
+];
+
 pub(crate) unsafe extern "C" fn get_defaults(settings: *mut ObsData) {
     guard((), || {
         if settings.is_null() {
@@ -112,7 +125,10 @@ pub(crate) unsafe extern "C" fn get_properties(data: *mut c_void) -> *mut ObsPro
                 estimated_latency_samples(48_000.0, &params),
                 48_000.0,
                 params.formant_independent,
-                Vec::new(),
+                load_presets()
+                    .iter()
+                    .map(|entry| entry.file.clone())
+                    .collect::<Vec<_>>(),
             )
         } else {
             let filter = unsafe { &mut *data.cast::<FilterData>() };
@@ -499,54 +515,67 @@ fn log(level: c_int, message: &str) {
 }
 
 pub(crate) fn load_presets() -> Vec<PresetEntry> {
-    let Some(dir) = presets_dir() else {
-        return Vec::new();
-    };
-    let entries = match std::fs::read_dir(&dir) {
-        Ok(entries) => entries,
-        Err(err) => {
-            log(
-                LOG_WARNING,
-                &format!(
-                    "voice-changer: preset directory not readable: {} ({err})",
-                    dir.display()
-                ),
-            );
-            return Vec::new();
-        }
-    };
-
     let mut presets = Vec::new();
     let mut skipped = 0usize;
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|ext| ext.to_str()) != Some("toml") {
+    let mut source = "(built-in)".to_string();
+
+    if let Some(dir) = presets_dir() {
+        source = dir.display().to_string();
+        match std::fs::read_dir(&dir) {
+            Ok(entries) => {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().and_then(|ext| ext.to_str()) != Some("toml") {
+                        continue;
+                    }
+                    let Some(file) = path
+                        .file_stem()
+                        .and_then(|stem| stem.to_str())
+                        .map(str::to_owned)
+                    else {
+                        continue;
+                    };
+                    let Ok(text) = std::fs::read_to_string(&path) else {
+                        skipped += 1;
+                        continue;
+                    };
+                    let Ok(preset) = crate::preset::parse(&text) else {
+                        skipped += 1;
+                        continue;
+                    };
+                    presets.push(PresetEntry { file, preset });
+                }
+            }
+            Err(err) => {
+                log(
+                    LOG_WARNING,
+                    &format!(
+                        "voice-changer: preset directory not readable: {} ({err})",
+                        dir.display()
+                    ),
+                );
+            }
+        }
+    }
+
+    for (file, text) in BUILTIN_PRESETS {
+        if presets.iter().any(|entry| entry.file == file) {
             continue;
         }
-        let Some(file) = path
-            .file_stem()
-            .and_then(|stem| stem.to_str())
-            .map(str::to_owned)
-        else {
-            continue;
-        };
-        let Ok(text) = std::fs::read_to_string(&path) else {
-            skipped += 1;
-            continue;
-        };
-        let Ok(preset) = crate::preset::parse(&text) else {
-            skipped += 1;
-            continue;
-        };
-        presets.push(PresetEntry { file, preset });
+        if let Ok(preset) = crate::preset::parse(text) {
+            presets.push(PresetEntry {
+                file: file.to_string(),
+                preset,
+            });
+        }
     }
+
     presets.sort_by(|a, b| a.file.cmp(&b.file));
     log(
         LOG_INFO,
         &format!(
-            "voice-changer: loaded {} preset(s) from {} (skipped {skipped})",
-            presets.len(),
-            dir.display()
+            "voice-changer: loaded {} preset(s) from {source} (skipped {skipped})",
+            presets.len()
         ),
     );
     presets
