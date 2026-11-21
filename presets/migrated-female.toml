@@ -27,8 +27,8 @@ gain_db = 2.0
 
 # 本プラグインでは適用しない（OBS 標準 EQ/コンプ用の参考値）
 [reference]
-low_shelf = { freq = 180.0, gain_db = -4.0 }
-peak = { freq = 3000.0, q = 1.0, gain_db = -2.0 }
-high_shelf = { freq = 7000.0, gain_db = 1.5 }
+low_shelf = { freq = 250.0, gain_db = -3.0 }
+peak = { freq = 2500.0, q = 1.0, gain_db = 2.0 }
+high_shelf = { freq = 5000.0, gain_db = 6.0 }
 lowpass_hz = 16000.0
 comp = { threshold_db = -18.0, ratio = 3.0, attack_ms = 8.0, release_ms = 150.0, makeup_db = 2.0 }
