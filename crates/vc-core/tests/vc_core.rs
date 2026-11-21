@@ -1,0 +1,242 @@
+use std::f32::consts::TAU;
+
+use vc_core::{Params, VoiceChanger};
+
+const SR: f32 = 48_000.0;
+
+fn sine(freq: f32, amp: f32, len: usize, sample_rate: f32) -> Vec<f32> {
+    (0..len)
+        .map(|i| amp * (TAU * freq * i as f32 / sample_rate).sin())
+        .collect()
+}
+
+fn rms(buf: &[f32]) -> f32 {
+    (buf.iter().map(|s| s * s).sum::<f32>() / buf.len() as f32).sqrt()
+}
+
+fn process_blocks(chain: &mut VoiceChanger, input: &[f32], block: usize) -> Vec<f32> {
+    let mut out = input.to_vec();
+    for chunk in out.chunks_mut(block) {
+        chain.process(chunk);
+    }
+    out
+}
+
+#[test]
+fn default_chain_preserves_midband_level() {
+    let input = sine(1_000.0, 0.25, 48_000, SR);
+    let mut chain = VoiceChanger::new(SR, 2048);
+    let out = process_blocks(&mut chain, &input, 480);
+
+    let skip = 24_000;
+    let ratio = rms(&out[skip..]) / rms(&input[skip..]);
+    assert!((ratio - 1.0).abs() < 0.01, "ratio = {ratio}");
+    assert!(out.iter().all(|s| s.is_finite()));
+}
+
+#[test]
+fn bypass_outputs_delayed_input_after_crossfade() {
+    let mut chain = VoiceChanger::new(SR, 2048);
+    let params = Params {
+        bypass: true,
+        ..Params::default()
+    };
+    chain.set_params(params);
+    let latency = chain.latency_samples();
+
+    // Let the 10 ms bypass crossfade settle and prime the dry delay line.
+    let total = 24_000 + 4_800;
+    let input = sine(1_000.0, 0.25, total, SR);
+    let mut out = input.clone();
+    chain.process(&mut out[..24_000]);
+    chain.process(&mut out[24_000..]);
+
+    for i in 24_000..total {
+        let expected = input[i - latency];
+        assert!(
+            (out[i] - expected).abs() < 1e-6,
+            "i = {i}, expected = {expected}, actual = {}",
+            out[i]
+        );
+    }
+}
+
+#[test]
+fn gain_change_is_smoothed() {
+    let settle = 24_012; // 500.25 cycles at 1 kHz: starts the change at a peak
+    let tail = 4_800;
+    let mut signal = sine(1_000.0, 0.25, settle + tail, SR);
+    let mut chain = VoiceChanger::new(SR, 2048);
+
+    chain.process(&mut signal[..settle]);
+
+    let params = Params {
+        input_gain_db: 6.0,
+        ..Params::default()
+    };
+    chain.set_params(params);
+
+    chain.process(&mut signal[settle..]);
+
+    let max_delta = signal[settle..]
+        .windows(2)
+        .map(|w| (w[1] - w[0]).abs())
+        .fold(0.0, f32::max);
+    assert!(max_delta < 0.08, "max_delta = {max_delta}");
+}
+
+#[test]
+fn works_at_44k1_and_48k() {
+    for sample_rate in [44_100.0_f32, 48_000.0] {
+        let len = (sample_rate * 0.5) as usize;
+        let input = sine(1_000.0, 0.25, len, sample_rate);
+        let mut chain = VoiceChanger::new(sample_rate, 2048);
+        let out = process_blocks(&mut chain, &input, 480);
+
+        let ratio = rms(&out[len / 2..]) / rms(&input[len / 2..]);
+        assert!(
+            (ratio - 1.0).abs() < 0.02,
+            "sample_rate = {sample_rate}, ratio = {ratio}"
+        );
+        assert!(out.iter().all(|s| s.is_finite()));
+    }
+}
+
+#[test]
+fn nan_and_inf_zero_the_block() {
+    let mut chain = VoiceChanger::new(SR, 8);
+    let mut buf = [
+        0.1,
+        f32::NAN,
+        0.2,
+        f32::INFINITY,
+        -0.1,
+        f32::NEG_INFINITY,
+        0.3,
+        0.0,
+    ];
+    chain.process(&mut buf);
+
+    assert!(buf.iter().all(|s| *s == 0.0));
+    assert_eq!(chain.error_count(), 1);
+
+    let mut ok = sine(1_000.0, 0.25, 480, SR);
+    chain.process(&mut ok);
+    assert!(ok.iter().all(|s| s.is_finite()));
+    assert_eq!(chain.error_count(), 1);
+}
+
+#[test]
+fn block_size_does_not_change_output() {
+    let input = sine(1_000.0, 0.25, 4_800, SR);
+    let mut one_shot = VoiceChanger::new(SR, 2048);
+    let mut small_blocks = VoiceChanger::new(SR, 2048);
+
+    let out_one_shot = process_blocks(&mut one_shot, &input, 4_800);
+    let out_small_blocks = process_blocks(&mut small_blocks, &input, 48);
+
+    for (a, b) in out_one_shot.iter().zip(out_small_blocks.iter()) {
+        assert!((a - b).abs() < 1e-6, "a = {a}, b = {b}");
+    }
+}
+
+fn goertzel(buf: &[f32], freq: f32, sample_rate: f32) -> f32 {
+    let n = buf.len();
+    let bin = (freq * n as f32 / sample_rate).round();
+    let omega = TAU * bin / n as f32;
+    let coeff = 2.0 * omega.cos();
+    let (mut s1, mut s2) = (0.0f32, 0.0f32);
+    for &value in buf {
+        let s0 = value + coeff * s1 - s2;
+        s2 = s1;
+        s1 = s0;
+    }
+    (s1 * s1 + s2 * s2 - coeff * s1 * s2).sqrt() / n as f32
+}
+
+fn vowel(sample_rate: f32, len: usize, f0: f32) -> Vec<f32> {
+    let formants = [
+        (700.0f32, 130.0f32, 1.0f32),
+        (1220.0, 160.0, 0.7),
+        (2600.0, 200.0, 0.4),
+    ];
+    (0..len)
+        .map(|i| {
+            let t = i as f32 / sample_rate;
+            let mut value = 0.0;
+            for h in 1..120 {
+                let freq = f0 * h as f32;
+                if freq > 5000.0 {
+                    break;
+                }
+                let mut amplitude = 0.0;
+                for &(formant, bandwidth, gain) in &formants {
+                    amplitude += gain * (-((freq - formant) / bandwidth).powi(2)).exp();
+                }
+                value += amplitude * (TAU * freq * t + (h as f32 * 1.7).sin()).sin();
+            }
+            value * 0.05
+        })
+        .collect()
+}
+
+#[test]
+fn chain_independent_formant_controls_the_envelope() {
+    let input = vowel(SR, SR as usize, 120.0);
+
+    let mut independent = VoiceChanger::new(SR, 2048);
+    independent.set_params(Params {
+        pitch_semitones: 12.0,
+        formant_independent: true,
+        formant_semitones: 6.0,
+        ..Params::default()
+    });
+    let out_independent = process_blocks(&mut independent, &input, 480);
+
+    let mut following = VoiceChanger::new(SR, 2048);
+    following.set_params(Params {
+        pitch_semitones: 12.0,
+        formant_independent: false,
+        ..Params::default()
+    });
+    let out_following = process_blocks(&mut following, &input, 480);
+
+    let start = (0.40 * SR) as usize;
+    let end = (0.90 * SR) as usize;
+    let ratio = |out: &[f32]| {
+        let segment = &out[start..end];
+        // F1 = 700 Hz: +6 semitones puts it near 990 Hz; +12 puts it near 1400 Hz.
+        let low = goertzel(segment, 960.0, SR) + goertzel(segment, 1080.0, SR);
+        let high = goertzel(segment, 1320.0, SR) + goertzel(segment, 1440.0, SR);
+        low / high
+    };
+
+    let independent_ratio = ratio(&out_independent);
+    let following_ratio = ratio(&out_following);
+    assert!(
+        independent_ratio > following_ratio * 1.4,
+        "independent = {independent_ratio}, following = {following_ratio}"
+    );
+}
+
+#[test]
+fn chain_pitch_shifts_sine_up() {
+    let input = sine(440.0, 0.25, 48_000, SR);
+    let mut chain = VoiceChanger::new(SR, 2048);
+    chain.set_params(Params {
+        pitch_semitones: 3.5,
+        ..Params::default()
+    });
+
+    let out = process_blocks(&mut chain, &input, 480);
+    let start = (0.30 * SR) as usize;
+    let end = (0.90 * SR) as usize;
+    let expected = 440.0 * 2f32.powf(3.5 / 12.0);
+
+    let expected_energy = goertzel(&out[start..end], expected, SR);
+    let original_energy = goertzel(&out[start..end], 440.0, SR);
+    assert!(
+        expected_energy > original_energy * 50.0,
+        "expected = {expected_energy}, original = {original_energy}"
+    );
+}

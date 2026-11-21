@@ -1,0 +1,49 @@
+name: Windows Build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build for Windows x64
+    runs-on: windows-2022
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Run vc-core tests
+        run: cargo test -p vc-core
+
+      - name: Run obs-filter layout tests
+        run: cargo test -p obs-filter
+
+      - name: Run clippy
+        run: cargo clippy -p obs-filter --all-targets --target x86_64-pc-windows-msvc -- -D warnings
+
+      - name: Build release DLL
+        run: cargo build -p obs-filter --release --target x86_64-pc-windows-msvc
+
+      - name: Package
+        run: ./build-aux/package-windows.ps1 -Configuration Release -SkipBuild
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: obs-plugin_voice-changer-windows-x64
+          path: dist/windows/
+          if-no-files-found: error
