@@ -419,6 +419,7 @@ unsafe extern "C" fn apply_preset(
                 c"output_gain_db".as_ptr(),
                 preset.output_gain_db as f64,
             );
+            ffi::obs_data_set_bool(settings, c"bypass".as_ptr(), false);
             ffi::obs_data_set_string(settings, c"preset".as_ptr(), c"sharp-female".as_ptr());
 
             ffi::obs_source_update(source, settings);
