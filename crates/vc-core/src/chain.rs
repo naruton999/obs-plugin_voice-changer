@@ -8,6 +8,10 @@ use crate::stages::hpf::HighPassStage;
 use crate::stages::pitch::PitchStage;
 use crate::stages::soft_clip::SoftClipStage;
 
+/// Ring buffer length for the latency-maintaining bypass. Large enough for
+/// the maximum pitch + formant latency at 48 kHz.
+const DRY_DELAY_CAPACITY: usize = 8192;
+
 /// Mono voice changer processing chain.
 ///
 /// The caller is responsible for the OBS 1ch/2ch rules. `process` does not
@@ -27,6 +31,8 @@ pub struct VoiceChanger {
 
     bypass_mix: LinearSmoother,
     dry_buf: Vec<f32>,
+    dry_delay: Vec<f32>,
+    dry_pos: usize,
     error_count: u64,
 }
 
@@ -61,6 +67,8 @@ impl VoiceChanger {
             soft_clip: SoftClipStage::new(),
             bypass_mix: LinearSmoother::new(0.0, bypass_ramp),
             dry_buf: vec![0.0; max_block_size],
+            dry_delay: vec![0.0; DRY_DELAY_CAPACITY],
+            dry_pos: 0,
             error_count: 0,
         };
 
@@ -162,8 +170,18 @@ impl VoiceChanger {
 
         let len = buf.len();
         let need_dry = self.bypass_mix.current() > 0.0 || self.bypass_mix.target() > 0.0;
-        if need_dry {
-            self.dry_buf[..len].copy_from_slice(buf);
+        let latency = self.latency_samples().min(DRY_DELAY_CAPACITY - 1);
+
+        // Keep the dry delay line running even when bypass is off, so enabling
+        // it does not produce a discontinuity. The dry signal is delayed by the
+        // same amount as the wet path to keep the total latency constant.
+        for (index, &sample) in buf.iter().enumerate() {
+            self.dry_delay[self.dry_pos] = sample;
+            if need_dry {
+                let read = (self.dry_pos + DRY_DELAY_CAPACITY - latency) % DRY_DELAY_CAPACITY;
+                self.dry_buf[index] = self.dry_delay[read];
+            }
+            self.dry_pos = (self.dry_pos + 1) % DRY_DELAY_CAPACITY;
         }
 
         self.input_gain.process(buf);
@@ -200,6 +218,8 @@ impl VoiceChanger {
         self.formant.reset();
         self.output_gain.reset();
         self.soft_clip.reset();
+        self.dry_delay.fill(0.0);
+        self.dry_pos = 0;
 
         let target = self.bypass_mix.target();
         self.bypass_mix.snap(target);

@@ -35,26 +35,28 @@ fn default_chain_preserves_midband_level() {
 }
 
 #[test]
-fn bypass_outputs_input_after_crossfade() {
+fn bypass_outputs_delayed_input_after_crossfade() {
     let mut chain = VoiceChanger::new(SR, 2048);
     let params = Params {
         bypass: true,
         ..Params::default()
     };
     chain.set_params(params);
+    let latency = chain.latency_samples();
 
-    // Let the 10 ms bypass crossfade settle.
-    let mut warmup = sine(1_000.0, 0.25, 4_800, SR);
-    chain.process(&mut warmup);
-
-    let input = sine(1_000.0, 0.25, 4_800, SR);
+    // Let the 10 ms bypass crossfade settle and prime the dry delay line.
+    let total = 24_000 + 4_800;
+    let input = sine(1_000.0, 0.25, total, SR);
     let mut out = input.clone();
-    chain.process(&mut out);
+    chain.process(&mut out[..24_000]);
+    chain.process(&mut out[24_000..]);
 
-    for (dry, actual) in input.iter().zip(out.iter()) {
+    for i in 24_000..total {
+        let expected = input[i - latency];
         assert!(
-            (dry - actual).abs() < 1e-6,
-            "dry = {dry}, actual = {actual}"
+            (out[i] - expected).abs() < 1e-6,
+            "i = {i}, expected = {expected}, actual = {}",
+            out[i]
         );
     }
 }
