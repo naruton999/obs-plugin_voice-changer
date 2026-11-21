@@ -494,7 +494,7 @@ fn presets_dir() -> Option<std::path::PathBuf> {
 
 fn log(level: c_int, message: &str) {
     if let Ok(message) = CString::new(message) {
-        unsafe { ffi::obs_log(level, message.as_ptr()) };
+        unsafe { ffi::blog(level, c"%s".as_ptr(), message.as_ptr()) };
     }
 }
 
