@@ -128,6 +128,35 @@ pub(crate) unsafe extern "C" fn get_properties(data: *mut c_void) -> *mut ObsPro
         }
 
         unsafe {
+            let list = ffi::obs_properties_add_list(
+                props,
+                c"preset".as_ptr(),
+                c"プリセット".as_ptr(),
+                ffi::OBS_COMBO_TYPE_LIST,
+                ffi::OBS_COMBO_FORMAT_STRING,
+            );
+            if !list.is_null() {
+                ffi::obs_property_list_add_string(
+                    list,
+                    c"sharp-female".as_ptr(),
+                    c"sharp-female".as_ptr(),
+                );
+            }
+            ffi::obs_properties_add_button(
+                props,
+                c"preset_apply".as_ptr(),
+                c"プリセットを適用".as_ptr(),
+                Some(apply_preset),
+            );
+            if !preset_available {
+                ffi::obs_properties_add_text(
+                    props,
+                    c"preset_error".as_ptr(),
+                    c"プリセットを読み込めませんでした".as_ptr(),
+                    ffi::OBS_TEXT_INFO,
+                );
+            }
+
             let independent_prop = ffi::obs_properties_add_bool(
                 props,
                 c"formant_independent".as_ptr(),
@@ -265,27 +294,6 @@ pub(crate) unsafe extern "C" fn get_properties(data: *mut c_void) -> *mut ObsPro
 
             ffi::obs_properties_add_bool(props, c"bypass".as_ptr(), c"遅延維持バイパス".as_ptr());
 
-            let list = ffi::obs_properties_add_list(
-                props,
-                c"preset".as_ptr(),
-                c"プリセット".as_ptr(),
-                ffi::OBS_COMBO_TYPE_LIST,
-                ffi::OBS_COMBO_FORMAT_STRING,
-            );
-            if !list.is_null() {
-                ffi::obs_property_list_add_string(
-                    list,
-                    c"sharp-female".as_ptr(),
-                    c"sharp-female".as_ptr(),
-                );
-            }
-            ffi::obs_properties_add_button(
-                props,
-                c"preset_apply".as_ptr(),
-                c"プリセットを適用".as_ptr(),
-                Some(apply_preset),
-            );
-
             let latency_ms = latency as f32 / sample_rate * 1000.0;
             if let Ok(text) =
                 CString::new(format!("概算遅延: 約 {latency_ms:.0} ms（+ OBS 約 21 ms）"))
@@ -303,15 +311,6 @@ pub(crate) unsafe extern "C" fn get_properties(data: *mut c_void) -> *mut ObsPro
                 c"v0.1.0".as_ptr(),
                 ffi::OBS_TEXT_INFO,
             );
-
-            if !preset_available {
-                ffi::obs_properties_add_text(
-                    props,
-                    c"preset_error".as_ptr(),
-                    c"プリセットを読み込めませんでした".as_ptr(),
-                    ffi::OBS_TEXT_INFO,
-                );
-            }
         }
 
         props
