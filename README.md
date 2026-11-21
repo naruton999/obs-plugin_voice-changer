@@ -85,6 +85,12 @@ cargo build -p obs-filter --release
 
 `dist/obs-plugin_voice-changer.plugin` が生成される（ad-hoc 署名済み）。
 
+配布用に Developer ID で署名する場合（公証はしない）:
+
+```bash
+CODESIGN_IDENTITY="Developer ID Application: ..." ./build-aux/package-macos.sh
+```
+
 #### 配置
 
 `dist/obs-plugin_voice-changer.plugin` を

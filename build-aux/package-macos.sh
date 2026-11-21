@@ -65,6 +65,7 @@ cat > "$OUT/Contents/Info.plist" <<'PLIST'
 </plist>
 PLIST
 
-codesign --force --sign - "$OUT/Contents/MacOS/obs-plugin_voice-changer"
-codesign --force --sign - "$OUT"
+IDENTITY="${CODESIGN_IDENTITY:--}"
+codesign --force --sign "$IDENTITY" "$OUT/Contents/MacOS/obs-plugin_voice-changer"
+codesign --force --sign "$IDENTITY" "$OUT"
 echo "created $OUT"
