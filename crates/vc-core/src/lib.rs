@@ -5,9 +5,11 @@
 //! responsible for the 1ch/2ch rules.
 
 mod chain;
+mod latency;
 pub mod params;
 mod smooth;
 mod stages;
 
 pub use chain::VoiceChanger;
+pub use latency::estimated_latency_samples;
 pub use params::Params;
