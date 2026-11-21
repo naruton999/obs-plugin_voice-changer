@@ -1,0 +1,52 @@
+name: macOS Build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build for macOS arm64
+    runs-on: macos-15
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Run vc-core tests
+        run: cargo test -p vc-core
+
+      - name: Run obs-filter layout tests
+        run: cargo test -p obs-filter
+
+      - name: Run clippy
+        run: cargo clippy -p obs-filter --all-targets --target aarch64-apple-darwin -- -D warnings
+
+      - name: Package
+        run: ./build-aux/package-macos.sh
+
+      - name: Check architecture
+        run: file dist/obs-plugin_voice-changer.plugin/Contents/MacOS/obs-plugin_voice-changer | grep arm64
+
+      - name: Create zip
+        run: ditto -c -k --sequesterRsrc --keepParent dist/obs-plugin_voice-changer.plugin dist/obs-plugin_voice-changer-macos-arm64.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: obs-plugin_voice-changer-macos-arm64
+          path: dist/obs-plugin_voice-changer-macos-arm64.zip
+          if-no-files-found: error
