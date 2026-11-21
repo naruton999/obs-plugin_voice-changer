@@ -16,6 +16,11 @@ const MAX_SHIFT_SEMITONES: f32 = 36.0;
 /// Clamp the spectral gain to avoid boosting near-silent bins excessively.
 const GAIN_MIN: f32 = 0.25;
 const GAIN_MAX: f32 = 4.0;
+/// Per-frame smoothing of the envelope gain (about 15 ms at 48 kHz).
+const GAIN_SMOOTHING: f32 = 0.35;
+/// Slow level matching (about 1 s at 48 kHz). The previous per-frame AGC
+/// pumped on transients and flattened the dynamics of the voice.
+const LEVEL_SMOOTHING: f32 = 0.005;
 /// Four Hann^2 windows at 75% overlap sum to 1.5.
 const OUTPUT_SCALE: f32 = 2.0 / 3.0;
 
@@ -131,6 +136,9 @@ pub(crate) struct FormantStage {
     latency: usize,
     delay_remaining: usize,
     level_gain: f32,
+    /// Smoothed per-bin envelope gain. Kept across frames so the spectral
+    /// envelope does not flicker from frame to frame ("musical noise").
+    gain_state: Vec<f32>,
 }
 
 impl FormantStage {
@@ -181,6 +189,7 @@ impl FormantStage {
             latency: 0,
             delay_remaining: 0,
             level_gain: 1.0,
+            gain_state: vec![1.0; FFT_SIZE / 2 + 1],
         };
         stage.reset();
         stage
@@ -211,6 +220,7 @@ impl FormantStage {
         self.latency = self.latency_samples();
         self.delay_remaining = self.latency;
         self.level_gain = 1.0;
+        self.gain_state.fill(1.0);
     }
 
     pub(crate) fn latency_samples(&self) -> usize {
@@ -246,8 +256,24 @@ impl FormantStage {
         self.cep_im.fill(0.0);
         self.fft.run(&mut self.cep_re, &mut self.cep_im, true);
 
+        // Raised-cosine taper instead of a hard cut. A rectangular lifter
+        // rings, which shows up as a metallic ripple in the shifted voice.
         let lifter = self.lifter;
-        self.cep_re[lifter + 1..FFT_SIZE - lifter].fill(0.0);
+        let taper_start = lifter * 3 / 4;
+        for (q, value) in self.cep_re.iter_mut().enumerate() {
+            let distance = q.min(FFT_SIZE - q);
+            let weight = if distance <= taper_start {
+                1.0
+            } else if distance >= lifter {
+                0.0
+            } else {
+                let phase = std::f32::consts::PI * (distance - taper_start) as f32
+                    / (lifter - taper_start) as f32;
+                0.5 + 0.5 * phase.cos()
+            };
+            *value *= weight;
+        }
+        self.cep_im.fill(0.0);
 
         self.env_re.copy_from_slice(&self.cep_re);
         self.env_im.fill(0.0);
@@ -257,7 +283,10 @@ impl FormantStage {
         for k in 0..=FFT_SIZE / 2 {
             let source = k as f32 / ratio;
             let warped = interpolate(&self.env_re, source);
-            let gain = (warped - self.env_re[k]).exp().clamp(GAIN_MIN, GAIN_MAX);
+            let target = (warped - self.env_re[k]).exp().clamp(GAIN_MIN, GAIN_MAX);
+            let state = &mut self.gain_state[k];
+            *state += (target - *state) * GAIN_SMOOTHING;
+            let gain = *state;
 
             self.re[k] *= gain;
             self.im[k] *= gain;
@@ -275,7 +304,7 @@ impl FormantStage {
         }
         if output_energy > 1e-20 {
             let target = (input_energy / output_energy).sqrt().clamp(0.5, 2.0);
-            self.level_gain = self.level_gain * 0.8 + target * 0.2;
+            self.level_gain += (target - self.level_gain) * LEVEL_SMOOTHING;
         }
 
         for i in 0..FFT_SIZE {
@@ -459,6 +488,27 @@ mod tests {
         assert!(
             mid_shifted > mid * 1.2,
             "1200Hz = {mid}, 1440Hz = {mid_shifted}"
+        );
+    }
+
+    #[test]
+    fn shifts_formant_energy_down() {
+        let sample_rate = 48_000.0;
+        let input = vowel(sample_rate, sample_rate as usize, 120.0);
+        let mut stage = FormantStage::new(sample_rate, 4096);
+        stage.set_params(true, -5.0);
+
+        let out = process_blocks(&mut stage, &input, 480);
+        let start = (0.30 * sample_rate) as usize;
+        let end = (0.90 * sample_rate) as usize;
+        let segment = &out[start..end];
+
+        // F1 = 700 Hz shifted down by 5 semitones is about 526 Hz.
+        let original = goertzel(segment, 700.0, sample_rate);
+        let shifted = goertzel(segment, 526.0, sample_rate);
+        assert!(
+            shifted > original * 1.2,
+            "700Hz = {original}, 526Hz = {shifted}"
         );
     }
 

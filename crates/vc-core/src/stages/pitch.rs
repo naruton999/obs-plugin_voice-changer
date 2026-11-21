@@ -219,8 +219,11 @@ impl PitchStage {
         }
 
         let previous = self.starts[((hop_index - 1) % 4) as usize];
+        let mut reference_energy = 0.0f32;
         for j in 0..self.corr_len {
-            self.corr_buf[j] = self.read_abs(previous + (self.hop + j) as f64 * ratio);
+            let value = self.read_abs(previous + (self.hop + j) as f64 * ratio);
+            self.corr_buf[j] = value;
+            reference_energy += value * value;
         }
 
         let mut best_offset = 0i32;
@@ -228,7 +231,7 @@ impl PitchStage {
 
         let mut offset = -self.search;
         while offset <= self.search {
-            let value = self.correlation(nominal + offset as f64, ratio);
+            let value = self.correlation(nominal + offset as f64, ratio, reference_energy);
             if value > best {
                 best = value;
                 best_offset = offset;
@@ -240,7 +243,7 @@ impl PitchStage {
         let high = (best_offset + FINE_RADIUS).min(self.search);
         let mut offset = low;
         while offset <= high {
-            let value = self.correlation(nominal + offset as f64, ratio);
+            let value = self.correlation(nominal + offset as f64, ratio, reference_energy);
             if value > best {
                 best = value;
                 best_offset = offset;
@@ -251,33 +254,58 @@ impl PitchStage {
         (nominal + best_offset as f64).max(0.0)
     }
 
-    fn correlation(&self, start: f64, ratio: f64) -> f32 {
-        let mut sum = 0.0f32;
+    /// Normalised cross-correlation.
+    ///
+    /// The raw dot product used previously favoured offsets whose waveform
+    /// happened to be louder, which pulled the grain alignment away from the
+    /// pitch period and produced a warbling/rough texture. Normalising by the
+    /// candidate energy makes the score depend on similarity only.
+    fn correlation(&self, start: f64, ratio: f64, reference_energy: f32) -> f32 {
+        let mut dot = 0.0f32;
+        let mut energy = 0.0f32;
         for j in 0..self.corr_len {
-            sum += self.read_abs(start + j as f64 * ratio) * self.corr_buf[j];
+            let value = self.read_abs(start + j as f64 * ratio);
+            dot += value * self.corr_buf[j];
+            energy += value * value;
         }
-        sum
+        dot / ((energy * reference_energy).sqrt() + 1e-12)
     }
 
+    /// Reads a fractional sample, interpolated with a 4-point Catmull-Rom
+    /// spline. Linear interpolation leaves a noticeable high-frequency haze on
+    /// large upward shifts.
     fn read_abs(&self, position: f64) -> f32 {
         if position < 0.0 {
             return 0.0;
         }
 
-        let index = position as u64;
+        let base = position.floor();
+        let fraction = (position - base) as f32;
+        if fraction <= f32::EPSILON {
+            return self.sample(base as i64);
+        }
+
+        let p0 = self.sample(base as i64 - 1);
+        let p1 = self.sample(base as i64);
+        let p2 = self.sample(base as i64 + 1);
+        let p3 = self.sample(base as i64 + 2);
+
+        let a = -0.5 * p0 + 1.5 * p1 - 1.5 * p2 + 0.5 * p3;
+        let b = p0 - 2.5 * p1 + 2.0 * p2 - 0.5 * p3;
+        let c = -0.5 * p0 + 0.5 * p2;
+        ((a * fraction + b) * fraction + c) * fraction + p1
+    }
+
+    fn sample(&self, index: i64) -> f32 {
+        if index < 0 {
+            return 0.0;
+        }
+        let index = index as u64;
         if index < self.history_base {
             return 0.0;
         }
-
         let local = (index - self.history_base) as usize;
-        if local + 1 >= self.history.len() {
-            return 0.0;
-        }
-
-        let fraction = (position - index as f64) as f32;
-        let a = self.history[local];
-        let b = self.history[local + 1];
-        a + (b - a) * fraction
+        self.history.get(local).copied().unwrap_or(0.0)
     }
 }
 
@@ -443,6 +471,48 @@ mod tests {
         for (a, b) in out_small.iter().zip(out_large.iter()) {
             assert!((a - b).abs() < 1e-6, "a = {a}, b = {b}");
         }
+    }
+
+    #[test]
+    fn cubic_interpolation_reproduces_integer_positions() {
+        let mut stage = PitchStage::new(48_000.0, 4096);
+        stage.history = (0..64)
+            .map(|i| (i as f32 * std::f32::consts::TAU / 32.0).sin())
+            .collect();
+        stage.history_base = 0;
+
+        for i in 1..60 {
+            let expected = stage.history[i];
+            assert!((stage.read_abs(i as f64) - expected).abs() < 1e-6);
+        }
+
+        let mid = stage.read_abs(10.5);
+        let linear = 0.5 * (stage.history[10] + stage.history[11]);
+        assert!((mid - linear).abs() < 0.5, "mid = {mid}, linear = {linear}");
+    }
+
+    #[test]
+    fn correlation_is_independent_of_level() {
+        let mut stage = PitchStage::new(48_000.0, 4096);
+        let omega = std::f32::consts::TAU / 100.0;
+        let mut history: Vec<f32> = (0..4096).map(|i| (i as f32 * omega).sin()).collect();
+        for value in history.iter_mut().skip(2000) {
+            *value *= 4.0;
+        }
+        stage.history = history;
+        stage.history_base = 0;
+        stage.corr_len = 200;
+        stage.corr_buf = (0..200).map(|i| (i as f32 * omega).sin()).collect();
+
+        let reference = stage
+            .corr_buf
+            .iter()
+            .map(|value| value * value)
+            .sum::<f32>();
+        let quiet = stage.correlation(0.0, 1.0, reference);
+        let loud = stage.correlation(2000.0, 1.0, reference);
+        assert!((quiet - 1.0).abs() < 1e-3, "quiet = {quiet}");
+        assert!((loud - 1.0).abs() < 1e-3, "loud = {loud}");
     }
 
     #[test]

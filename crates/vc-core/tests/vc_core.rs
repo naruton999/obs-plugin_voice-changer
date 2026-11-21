@@ -154,6 +154,71 @@ fn goertzel(buf: &[f32], freq: f32, sample_rate: f32) -> f32 {
     (s1 * s1 + s2 * s2 - coeff * s1 * s2).sqrt() / n as f32
 }
 
+fn vowel(sample_rate: f32, len: usize, f0: f32) -> Vec<f32> {
+    let formants = [
+        (700.0f32, 130.0f32, 1.0f32),
+        (1220.0, 160.0, 0.7),
+        (2600.0, 200.0, 0.4),
+    ];
+    (0..len)
+        .map(|i| {
+            let t = i as f32 / sample_rate;
+            let mut value = 0.0;
+            for h in 1..120 {
+                let freq = f0 * h as f32;
+                if freq > 5000.0 {
+                    break;
+                }
+                let mut amplitude = 0.0;
+                for &(formant, bandwidth, gain) in &formants {
+                    amplitude += gain * (-((freq - formant) / bandwidth).powi(2)).exp();
+                }
+                value += amplitude * (TAU * freq * t + (h as f32 * 1.7).sin()).sin();
+            }
+            value * 0.05
+        })
+        .collect()
+}
+
+#[test]
+fn chain_independent_formant_controls_the_envelope() {
+    let input = vowel(SR, SR as usize, 120.0);
+
+    let mut independent = VoiceChanger::new(SR, 2048);
+    independent.set_params(Params {
+        pitch_semitones: 12.0,
+        formant_independent: true,
+        formant_semitones: 6.0,
+        ..Params::default()
+    });
+    let out_independent = process_blocks(&mut independent, &input, 480);
+
+    let mut following = VoiceChanger::new(SR, 2048);
+    following.set_params(Params {
+        pitch_semitones: 12.0,
+        formant_independent: false,
+        ..Params::default()
+    });
+    let out_following = process_blocks(&mut following, &input, 480);
+
+    let start = (0.40 * SR) as usize;
+    let end = (0.90 * SR) as usize;
+    let ratio = |out: &[f32]| {
+        let segment = &out[start..end];
+        // F1 = 700 Hz: +6 semitones puts it near 990 Hz; +12 puts it near 1400 Hz.
+        let low = goertzel(segment, 960.0, SR) + goertzel(segment, 1080.0, SR);
+        let high = goertzel(segment, 1320.0, SR) + goertzel(segment, 1440.0, SR);
+        low / high
+    };
+
+    let independent_ratio = ratio(&out_independent);
+    let following_ratio = ratio(&out_following);
+    assert!(
+        independent_ratio > following_ratio * 1.4,
+        "independent = {independent_ratio}, following = {following_ratio}"
+    );
+}
+
 #[test]
 fn chain_pitch_shifts_sine_up() {
     let input = sine(440.0, 0.25, 48_000, SR);
