@@ -142,6 +142,29 @@ CODESIGN_IDENTITY="Developer ID Application: ..." ./build-aux/package-macos.sh
 `dist/obs-plugin_voice-changer.plugin` を
 `~/Library/Application Support/obs-studio/plugins/` にコピーし、OBS を再起動する。
 
+#### プリセットの場所
+
+同梱プリセットと追加プリセットは、プラグインバンドル内の
+`Contents/Resources/presets/` に置く。
+
+```text
+~/Library/Application Support/obs-studio/plugins/
+└─ obs-plugin_voice-changer.plugin/
+   └─ Contents/
+      └─ Resources/
+         └─ presets/
+            ├─ general-female.toml   # 一般女性（同梱・既定）
+            ├─ general-male.toml     # 一般男性（同梱）
+            └─ my-preset.toml        # 追加する場合
+```
+
+- 追加プリセットも同じフォルダに `.toml` を置く。
+- 反映には OBS の再起動、またはフィルターのプロパティを開き直す。
+- システム全体へ入れた場合（`/Library/Application Support/obs-studio/plugins/`）は、
+  上記の `~/Library` を `/Library` に読み替える。管理者権限が必要。
+- 旧バージョンのプリセット（`wet-female.toml` など）が残っていると一覧に出るため、
+  不要な `.toml` は削除する。
+
 ### Windows（x64）
 
 #### ビルド・パッケージ
@@ -164,8 +187,14 @@ cargo build -p obs-filter --release --target x86_64-pc-windows-msvc
 ```
 C:\ProgramData\obs-studio\plugins\obs-plugin_voice-changer\
 ├─ obs-plugin_voice-changer.dll
-└─ data\presets\general-female.toml
+└─ data\presets\
+   ├─ general-female.toml
+   └─ general-male.toml
 ```
+
+追加プリセットは同じ `data\presets\` に `.toml` を置き、OBS を再起動するか
+フィルターのプロパティを開き直す。旧配置の場合は
+`C:\Program Files\obs-studio\data\obs-plugins\obs-plugin_voice-changer\presets\` が対象。
 
 `OBS_PLUGINS_PATH` を設定している場合は、そのフォルダ配下に置いてもよい。
 
