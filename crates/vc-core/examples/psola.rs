@@ -46,6 +46,8 @@ fn run() -> Result<(), String> {
     let semitones = value(&args, "--pitch", 11.0);
     let formant = value(&args, "--formant", 0.0);
     let grain_formant = value(&args, "--grain-formant", 0.0);
+    let grain_mult = value(&args, "--grain-mult", 2.0);
+    let out_window = args.iter().any(|arg| arg == "--out-window");
     let raw = args.iter().any(|arg| arg == "--raw");
     let peak_marks = args.iter().any(|arg| arg == "--peak-marks");
     let cubic = args.iter().any(|arg| arg == "--cubic");
@@ -76,6 +78,8 @@ fn run() -> Result<(), String> {
         &marks,
         semitones,
         2f32.powf(grain_formant / 12.0),
+        grain_mult,
+        out_window,
         cubic,
     );
 
@@ -309,6 +313,7 @@ fn build_marks(mono: &[f32], sr: usize, f0: &[f32], peak_marks: bool) -> Vec<usi
     marks
 }
 
+#[allow(clippy::too_many_arguments)]
 fn psola(
     mono: &[f32],
     sr: usize,
@@ -316,6 +321,8 @@ fn psola(
     marks: &[usize],
     semitones: f32,
     formant_ratio: f32,
+    grain_mult: f32,
+    out_window: bool,
     cubic: bool,
 ) -> Vec<f32> {
     if marks.is_empty() {
@@ -342,12 +349,14 @@ fn psola(
         }
         let mark = marks[mark_index] as f32;
 
-        let grain_len = (2.0 * input_period).round() as usize;
-        let out_len = ((grain_len as f32 / formant_ratio).round() as usize).max(2);
-        let source_half = grain_len as f32 * 0.5;
-        let dest_half = out_len as f32 * 0.5;
-        let source_start = mark - source_half;
-        let dest_start = output_position - dest_half;
+        let out_len = if out_window {
+            (2.0 * output_period).round().max(2.0) as usize
+        } else {
+            ((grain_mult * input_period / formant_ratio).round() as usize).max(2)
+        };
+        let source_span = out_len as f32 * formant_ratio;
+        let source_start = mark - source_span * 0.5;
+        let dest_start = output_position - out_len as f32 * 0.5;
         for i in 0..out_len {
             let source = source_start + i as f32 * formant_ratio;
             let dest = dest_start + i as f32;
