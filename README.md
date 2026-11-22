@@ -10,8 +10,8 @@ v0.1.0 開発中。
 |---|---|
 | `vc-core` | DSP チェーン（ゲイン／HPF／ピッチ／フォルマント／トーン EQ／コンプ） |
 | `obs-filter` | macOS arm64 / Windows x64。`vc-core` を接続済み |
-| ピッチ | WSOLA（既定）と位相ロック付きフェーズボコーダを切替可能 |
-| フォルマント | 独立 STFT 段（テーパー付きリフタ、必要なときだけ実行） |
+| ピッチ | PSOLA（既定・`wet-female`）／WSOLA／位相ロック付きフェーズボコーダ |
+| フォルマント | PSOLA はグレイン内で処理。WSOLA / PV は独立 STFT 段 |
 | ステレオ | 2ch は Mid を1回処理して左右へコピー（左右の位相ずれ・揺れ防止） |
 | ゲート | ダウンワードエキスパンダ実装済み（既定 OFF） |
 | UI・プリセット読込 | 実装済み（`high-quality-female` ほか） |
@@ -57,7 +57,8 @@ cargo fmt --check
 | フォルマント独立制御 | ON のとき、フォルマントをピッチと別に設定 |
 | フォルマントを有効にする | OFF で STFT 処理をスキップ（遅延が約 21ms 減る） |
 | ピッチ / フォルマント | -12〜+12 半音（0.1 刻み） |
-| 高品質モード（フェーズボコーダ・任意） | 既定 OFF（WSOLA）。ON で位相ロック付き PV に切り替え |
+| 高品質モード（フェーズボコーダ・任意） | 既定 OFF。ON で位相ロック付き PV に切り替え |
+| PSOLA（wet 再現） | 既定 ON（`wet-female`）。OFF で WSOLA / PV を使用 |
 | 入力ゲイン / HPF / 出力ゲイン | 各スライダー |
 | トーン EQ | 低域 (250Hz) / プレゼンス (2.5kHz) / 高域 (5kHz) の ±12dB |
 | コンプレッサー | ON/OFF と Threshold / Ratio / Attack / Release / Makeup |
@@ -75,7 +76,8 @@ cargo fmt --check
 
 | ファイル | 内容 |
 |---|---|
-| `high-quality-female.toml` | **推奨（高品質モード/PV）**（ピッチ +12 / フォルマント +4.4 / トーン EQ / コンプ / 出力 +2.0dB） |
+| `wet-female.toml` | **既定（PSOLA）**。既存ボイチェン `wet.wav` 再現（ピッチ +11 / グレインF +5） |
+| `high-quality-female.toml` | 高品質モード/PV（ピッチ +12 / フォルマント +4.4 / トーン EQ / コンプ / 出力 +2.0dB） |
 | `standard-female.toml` | WSOLA 版の標準（同じ音色設定、`phase_vocoder=false`） |
 | `sharp-female.toml` | 控えめな女性化（ピッチ +3.5 / フォルマント +2.5） |
 | `natural-female.toml` | 別案（ピッチ +11 / フォルマント +6.0 / トーン控えめ） |
@@ -95,8 +97,9 @@ cargo fmt --check
 | 高域 EQ | +0〜+6 dB | 標準は +6。歯擦音が気になる場合は +2〜+3 に下げる |
 | コンプ | ratio 2〜3 | かけすぎると「放送声」になる |
 
-**`high-quality-female` が推奨プリセット**（高品質モード/PV）。`standard-female` は同じ音色設定の
-WSOLA 版、`natural-female` / `bright-female` / `max-female` は別案、`migrated-female` は
+**`wet-female` が既定プリセット**（PSOLA、ピッチ +11 / グレインF +5）。
+高品質モードが必要な場合は `high-quality-female`（PV）、WSOLA 版は `standard-female` を使う。
+`natural-female` / `bright-female` / `max-female` は別案、`migrated-female` は
 `standard-female` の旧名（互換用）。
 
 オフラインで聴き比べる場合（既定は WSOLA、`--pv` でフェーズボコーダ）:
@@ -109,10 +112,11 @@ cargo run -p vc-core --example render -- \
   --out-gain 2 --hpf 100
 ```
 
-内部遅延の目安: **WSOLA（既定）はピッチ 40ms＋フォルマント 21ms で約 61ms**。
-高品質モード（PV）はピッチ 43ms＋フォルマント 21ms で約 64ms。ピッチ 0 のときはピッチ段をスキップする。
-OBS の音声ブロック（約 21ms）を含めると 82〜85ms。フォルマントを OFF にすると約 21ms 減る。
+内部遅延の目安: **PSOLA（既定 `wet-female`）は約 92ms**（OBS ブロック込み約 113ms）。
+WSOLA はピッチ 40ms＋フォルマント 21ms で約 61ms、高品質モード（PV）は約 64ms。
+OBS の音声ブロック（約 21ms）を含めると WSOLA/PV は 82〜85ms。フォルマントを OFF にすると約 21ms 減る。
 
+> PSOLA は `wet.wav` の単一音声感を優先したため遅延が大きい。低遅延用途では WSOLA / PV を使う。
 > 高品質モードは WSOLA より CPU を使います（FFT 2048 点＋位相ロック＋包絡推定）。
 
 libobs はビルド時にリンクしない。macOS は OBS がプラグインをロードするときにシンボルを解決し、
