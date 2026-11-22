@@ -47,6 +47,8 @@ fn run() -> Result<(), String> {
     let formant = value(&args, "--formant", 0.0);
     let grain_formant = value(&args, "--grain-formant", 0.0);
     let raw = args.iter().any(|arg| arg == "--raw");
+    let peak_marks = args.iter().any(|arg| arg == "--peak-marks");
+    let cubic = args.iter().any(|arg| arg == "--cubic");
 
     let wav = read_wav(input_path)?;
     let mono = downmix(&wav);
@@ -56,7 +58,7 @@ fn run() -> Result<(), String> {
     // does not pull the period estimate.
     let low = lowpass(&mono, sr, 500.0);
     let f0 = estimate_f0(&low, sr);
-    let marks = build_marks(&low, sr, &f0);
+    let marks = build_marks(&low, sr, &f0, peak_marks);
     let voiced: Vec<f32> = f0.iter().copied().filter(|f| *f > 0.0).collect();
     if !voiced.is_empty() {
         let mut sorted = voiced.clone();
@@ -74,6 +76,7 @@ fn run() -> Result<(), String> {
         &marks,
         semitones,
         2f32.powf(grain_formant / 12.0),
+        cubic,
     );
 
     if formant.abs() > 1e-6 {
@@ -264,9 +267,10 @@ fn f0_at(f0: &[f32], sr: usize, position: f32) -> f32 {
     f0.get(index).copied().unwrap_or(0.0)
 }
 
-fn build_marks(mono: &[f32], sr: usize, f0: &[f32]) -> Vec<usize> {
+fn build_marks(mono: &[f32], sr: usize, f0: &[f32], peak_marks: bool) -> Vec<usize> {
     let mut marks = Vec::new();
     let mut position = 0.0f32;
+    let mut first = true;
     while (position as usize) < mono.len() {
         let f = f0_at(f0, sr, position);
         let period = if f > 0.0 {
@@ -275,8 +279,32 @@ fn build_marks(mono: &[f32], sr: usize, f0: &[f32]) -> Vec<usize> {
             sr as f32 * 0.010
         }
         .clamp(16.0, sr as f32 / 50.0);
-        marks.push(position as usize);
-        position += period;
+
+        if peak_marks {
+            let half = if first { period } else { period * 0.25 };
+            let lo = (position - half).max(0.0) as usize;
+            let hi = ((position + half) as usize).min(mono.len());
+            let mut best = position as usize;
+            let mut best_value = 0.0f32;
+            for (offset, sample) in mono[lo..hi].iter().enumerate() {
+                let value = sample.abs();
+                if value > best_value {
+                    best_value = value;
+                    best = lo + offset;
+                }
+            }
+            let mark = if first {
+                best
+            } else {
+                (position + 0.5 * (best as f32 - position)) as usize
+            };
+            marks.push(mark);
+            position = mark as f32 + period;
+        } else {
+            marks.push(position as usize);
+            position += period;
+        }
+        first = false;
     }
     marks
 }
@@ -288,6 +316,7 @@ fn psola(
     marks: &[usize],
     semitones: f32,
     formant_ratio: f32,
+    cubic: bool,
 ) -> Vec<f32> {
     if marks.is_empty() {
         return mono.to_vec();
@@ -328,17 +357,12 @@ fn psola(
             }
             let window =
                 0.5 - 0.5 * (2.0 * PI * i as f32 / (out_len.saturating_sub(1)).max(1) as f32).cos();
-            let source_floor = source.floor();
-            let fraction = source - source_floor;
-            let s0 = source_floor as usize;
-            let s1 = (s0 + 1).min(mono.len() - 1);
-            let sample = mono[s0] * (1.0 - fraction) + mono[s1] * fraction;
+            let sample = interpolate_sample(mono, source, cubic);
             let dest_index = dest.round() as usize;
-            if dest_index >= out.len() {
-                continue;
+            if dest_index < out.len() {
+                out[dest_index] += sample * window;
+                weight[dest_index] += window * window;
             }
-            out[dest_index] += sample * window;
-            weight[dest_index] += window * window;
         }
         output_position += output_period;
     }
@@ -351,6 +375,33 @@ fn psola(
         }
     }
     out
+}
+
+fn interpolate_sample(data: &[f32], position: f32, cubic: bool) -> f32 {
+    let len = data.len() as i64;
+    if len == 0 {
+        return 0.0;
+    }
+    let base = position.floor() as i64;
+    let fraction = position - base as f32;
+    let get = |index: i64| {
+        let index = index.clamp(0, len - 1) as usize;
+        data[index]
+    };
+    if cubic {
+        let p0 = get(base - 1);
+        let p1 = get(base);
+        let p2 = get(base + 1);
+        let p3 = get(base + 2);
+        let a = -0.5 * p0 + 1.5 * p1 - 1.5 * p2 + 0.5 * p3;
+        let b = p0 - 2.5 * p1 + 2.0 * p2 - 0.5 * p3;
+        let c = -0.5 * p0 + 0.5 * p2;
+        ((a * fraction + b) * fraction + c) * fraction + p1
+    } else {
+        let p1 = get(base);
+        let p2 = get(base + 1);
+        p1 * (1.0 - fraction) + p2 * fraction
+    }
 }
 
 fn downmix(wav: &Wav) -> Vec<f32> {
