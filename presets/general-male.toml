@@ -1,0 +1,42 @@
+schema_version = 1
+name = "一般男性"
+description = "地声を整える男性用。ピッチ変更なし＋軽いコンプ/EQ"
+created = "2026-11-22"
+
+[input]
+gain_db = 0.0
+hpf_hz = 80.0
+
+[gate]
+enabled = false
+threshold_db = -45.0
+ratio = 4.0
+attack_ms = 5.0
+release_ms = 120.0
+hold_ms = 40.0
+
+[pitch]
+semitones = 0.0
+phase_vocoder = false
+psola = false
+
+[formant]
+enabled = false
+independent = true
+semitones = 0.0
+
+[tone]
+low_db = 1.0
+mid_db = 0.0
+high_db = -1.0
+
+[compressor]
+enabled = true
+threshold_db = -20.0
+ratio = 2.5
+attack_ms = 10.0
+release_ms = 150.0
+makeup_db = 1.0
+
+[output]
+gain_db = 2.0

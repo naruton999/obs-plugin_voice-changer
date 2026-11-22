@@ -72,7 +72,28 @@ impl Default for Preset {
 #[cfg(not(test))]
 pub(crate) struct PresetEntry {
     pub file: String,
+    pub display: String,
     pub preset: Preset,
+}
+
+/// Reads the top-level `name` field used as the UI label.
+pub(crate) fn parse_name(text: &str) -> Option<String> {
+    for raw in text.lines() {
+        let line = raw.split('#').next().unwrap_or("").trim();
+        if line.starts_with('[') {
+            break;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        if key.trim() == "name" {
+            let value = value.trim().trim_matches('"');
+            if !value.is_empty() {
+                return Some(value.to_string());
+            }
+        }
+    }
+    None
 }
 
 pub(crate) fn parse(text: &str) -> Result<Preset, String> {
@@ -174,77 +195,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_the_bundled_preset() {
-        let preset = parse(include_str!("../../../presets/sharp-female.toml")).unwrap();
-        assert_eq!(preset.input_gain_db, 0.0);
-        assert_eq!(preset.hpf_hz, 80.0);
-        assert!(!preset.gate_enabled);
-        assert_eq!(preset.pitch_semitones, 3.5);
-        assert!(!preset.phase_vocoder);
-        assert!(preset.formant_enabled);
-        assert!(preset.formant_independent);
-        assert_eq!(preset.formant_semitones, 2.5);
-        assert_eq!(preset.tone_low_db, -1.0);
-        assert_eq!(preset.tone_mid_db, 2.5);
-        assert_eq!(preset.tone_high_db, 4.0);
-        assert!(!preset.compressor_enabled);
-    }
-
-    #[test]
-    fn parses_the_migrated_preset() {
-        let preset = parse(include_str!("../../../presets/migrated-female.toml")).unwrap();
-        assert_eq!(preset.input_gain_db, 0.0);
-        assert_eq!(preset.hpf_hz, 100.0);
-        assert_eq!(preset.pitch_semitones, 12.0);
-        assert!(!preset.phase_vocoder);
-        assert!(preset.formant_enabled);
-        assert!(preset.formant_independent);
-        assert_eq!(preset.formant_semitones, 4.4);
-        assert_eq!(preset.tone_low_db, -3.0);
-        assert_eq!(preset.tone_mid_db, 2.0);
-        assert_eq!(preset.tone_high_db, 6.0);
-        assert!(preset.compressor_enabled);
-        assert_eq!(preset.compressor_threshold_db, -18.0);
-        assert_eq!(preset.compressor_ratio, 3.0);
-        assert_eq!(preset.compressor_attack_ms, 8.0);
-        assert_eq!(preset.compressor_release_ms, 150.0);
-        assert_eq!(preset.compressor_makeup_db, 2.0);
-        assert_eq!(preset.output_gain_db, 2.0);
-    }
-
-    #[test]
-    fn parses_all_bundled_presets() {
-        for text in [
-            include_str!("../../../presets/sharp-female.toml"),
-            include_str!("../../../presets/migrated-female.toml"),
-            include_str!("../../../presets/standard-female.toml"),
-            include_str!("../../../presets/high-quality-female.toml"),
-            include_str!("../../../presets/wet-female.toml"),
-            include_str!("../../../presets/natural-female.toml"),
-            include_str!("../../../presets/bright-female.toml"),
-            include_str!("../../../presets/max-female.toml"),
-        ] {
-            parse(text).unwrap();
-        }
-    }
-
-    #[test]
-    fn parses_the_standard_preset() {
-        let preset = parse(include_str!("../../../presets/standard-female.toml")).unwrap();
-        assert_eq!(preset.pitch_semitones, 12.0);
-        assert!(!preset.phase_vocoder);
-        assert!(preset.formant_independent);
-        assert_eq!(preset.formant_semitones, 4.4);
-        assert_eq!(preset.tone_low_db, -3.0);
-        assert_eq!(preset.tone_mid_db, 2.0);
-        assert_eq!(preset.tone_high_db, 6.0);
-        assert!(preset.compressor_enabled);
-        assert_eq!(preset.output_gain_db, 2.0);
-    }
-
-    #[test]
-    fn parses_the_wet_preset() {
-        let preset = parse(include_str!("../../../presets/wet-female.toml")).unwrap();
+    fn parses_general_female() {
+        let text = include_str!("../../../presets/general-female.toml");
+        let preset = parse(text).unwrap();
+        assert_eq!(parse_name(text).as_deref(), Some("一般女性"));
         assert_eq!(preset.pitch_semitones, 11.0);
         assert!(!preset.phase_vocoder);
         assert!(preset.psola);
@@ -253,6 +207,31 @@ mod tests {
         assert_eq!(preset.formant_semitones, 5.0);
         assert!(!preset.compressor_enabled);
         assert_eq!(preset.output_gain_db, 1.0);
+    }
+
+    #[test]
+    fn parses_general_male() {
+        let text = include_str!("../../../presets/general-male.toml");
+        let preset = parse(text).unwrap();
+        assert_eq!(parse_name(text).as_deref(), Some("一般男性"));
+        assert_eq!(preset.pitch_semitones, 0.0);
+        assert!(!preset.phase_vocoder);
+        assert!(!preset.psola);
+        assert!(!preset.formant_enabled);
+        assert!(preset.formant_independent);
+        assert_eq!(preset.formant_semitones, 0.0);
+        assert!(preset.compressor_enabled);
+        assert_eq!(preset.output_gain_db, 2.0);
+    }
+
+    #[test]
+    fn parses_all_bundled_presets() {
+        for text in [
+            include_str!("../../../presets/general-female.toml"),
+            include_str!("../../../presets/general-male.toml"),
+        ] {
+            parse(text).unwrap();
+        }
     }
 
     #[test]

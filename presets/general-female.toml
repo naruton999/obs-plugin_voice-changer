@@ -1,6 +1,6 @@
 schema_version = 1
-name = "wet-female"
-description = "既存ボイチェン（wet.wav）再現。PSOLA +11 / グレインF +5"
+name = "一般女性"
+description = "自然な女性声。PSOLA +11 / グレインF +5"
 created = "2026-11-22"
 
 [input]

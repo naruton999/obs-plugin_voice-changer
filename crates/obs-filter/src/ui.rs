@@ -7,45 +7,21 @@ use vc_core::{Params, estimated_latency_samples};
 use crate::ffi::{self, ObsData, ObsProperties, ObsProperty};
 use crate::filter::FilterData;
 use crate::guard;
-use crate::preset::{Preset, PresetEntry};
+use crate::preset::{Preset, PresetEntry, parse_name};
 
 const LOG_WARNING: c_int = 200;
 const LOG_INFO: c_int = 300;
 
 /// Presets compiled into the plugin so the list is never empty, even when the
 /// data folder or preset files are missing.
-const BUILTIN_PRESETS: [(&str, &str); 8] = [
+const BUILTIN_PRESETS: [(&str, &str); 2] = [
     (
-        "sharp-female",
-        include_str!("../../../presets/sharp-female.toml"),
+        "general-female",
+        include_str!("../../../presets/general-female.toml"),
     ),
     (
-        "migrated-female",
-        include_str!("../../../presets/migrated-female.toml"),
-    ),
-    (
-        "standard-female",
-        include_str!("../../../presets/standard-female.toml"),
-    ),
-    (
-        "high-quality-female",
-        include_str!("../../../presets/high-quality-female.toml"),
-    ),
-    (
-        "wet-female",
-        include_str!("../../../presets/wet-female.toml"),
-    ),
-    (
-        "natural-female",
-        include_str!("../../../presets/natural-female.toml"),
-    ),
-    (
-        "bright-female",
-        include_str!("../../../presets/bright-female.toml"),
-    ),
-    (
-        "max-female",
-        include_str!("../../../presets/max-female.toml"),
+        "general-male",
+        include_str!("../../../presets/general-male.toml"),
     ),
 ];
 
@@ -169,7 +145,11 @@ pub(crate) unsafe extern "C" fn get_defaults(settings: *mut ObsData) {
                 defaults.compressor_makeup_db as f64,
             );
             ffi::obs_data_set_default_bool(settings, c"bypass".as_ptr(), false);
-            ffi::obs_data_set_default_string(settings, c"preset".as_ptr(), c"wet-female".as_ptr());
+            ffi::obs_data_set_default_string(
+                settings,
+                c"preset".as_ptr(),
+                c"general-female".as_ptr(),
+            );
         }
     });
 }
@@ -190,7 +170,7 @@ pub(crate) unsafe extern "C" fn update(data: *mut c_void, settings: *mut ObsData
 
 pub(crate) unsafe extern "C" fn get_properties(data: *mut c_void) -> *mut ObsProperties {
     guard(ptr::null_mut(), || {
-        let (latency, sample_rate, independent, preset_names) = if data.is_null() {
+        let (latency, sample_rate, independent, preset_entries) = if data.is_null() {
             let params = Params::default();
             (
                 estimated_latency_samples(48_000.0, &params),
@@ -198,7 +178,7 @@ pub(crate) unsafe extern "C" fn get_properties(data: *mut c_void) -> *mut ObsPro
                 params.formant_independent,
                 load_presets()
                     .iter()
-                    .map(|entry| entry.file.clone())
+                    .map(|entry| (entry.display.clone(), entry.file.clone()))
                     .collect::<Vec<_>>(),
             )
         } else {
@@ -212,7 +192,7 @@ pub(crate) unsafe extern "C" fn get_properties(data: *mut c_void) -> *mut ObsPro
                 filter
                     .presets
                     .iter()
-                    .map(|entry| entry.file.clone())
+                    .map(|entry| (entry.display.clone(), entry.file.clone()))
                     .collect::<Vec<_>>(),
             )
         };
@@ -231,10 +211,13 @@ pub(crate) unsafe extern "C" fn get_properties(data: *mut c_void) -> *mut ObsPro
                 ffi::OBS_COMBO_FORMAT_STRING,
             );
             if !list.is_null() {
-                for name in &preset_names {
-                    if let Ok(cname) = CString::new(name.as_str()) {
-                        ffi::obs_property_list_add_string(list, cname.as_ptr(), cname.as_ptr());
-                    }
+                for (display, file) in &preset_entries {
+                    let (Ok(label), Ok(value)) =
+                        (CString::new(display.as_str()), CString::new(file.as_str()))
+                    else {
+                        continue;
+                    };
+                    ffi::obs_property_list_add_string(list, label.as_ptr(), value.as_ptr());
                 }
             }
             ffi::obs_properties_add_button(
@@ -243,7 +226,7 @@ pub(crate) unsafe extern "C" fn get_properties(data: *mut c_void) -> *mut ObsPro
                 c"プリセットを適用".as_ptr(),
                 Some(apply_preset),
             );
-            if preset_names.is_empty() {
+            if preset_entries.is_empty() {
                 ffi::obs_properties_add_text(
                     props,
                     c"preset_error".as_ptr(),
@@ -285,11 +268,7 @@ pub(crate) unsafe extern "C" fn get_properties(data: *mut c_void) -> *mut ObsPro
                 c"phase_vocoder".as_ptr(),
                 c"高品質モード（フェーズボコーダ・任意）".as_ptr(),
             );
-            ffi::obs_properties_add_bool(
-                props,
-                c"psola".as_ptr(),
-                c"PSOLA（wet 再現・試作）".as_ptr(),
-            );
+            ffi::obs_properties_add_bool(props, c"psola".as_ptr(), c"自然な声（PSOLA）".as_ptr());
 
             let formant = ffi::obs_properties_add_float_slider(
                 props,
@@ -701,7 +680,8 @@ fn presets_dir() -> Option<std::path::PathBuf> {
 
     // Prefer a resolved preset file path. This works even when the module
     // data path is relative (legacy Windows layout).
-    let probe = unsafe { ffi::obs_find_module_file(module, c"presets/sharp-female.toml".as_ptr()) };
+    let probe =
+        unsafe { ffi::obs_find_module_file(module, c"presets/general-female.toml".as_ptr()) };
     if !probe.is_null() {
         let path = unsafe { CStr::from_ptr(probe) }
             .to_string_lossy()
@@ -762,7 +742,12 @@ pub(crate) fn load_presets() -> Vec<PresetEntry> {
                         skipped += 1;
                         continue;
                     };
-                    presets.push(PresetEntry { file, preset });
+                    let display = parse_name(&text).unwrap_or_else(|| file.clone());
+                    presets.push(PresetEntry {
+                        file,
+                        display,
+                        preset,
+                    });
                 }
             }
             Err(err) => {
@@ -784,6 +769,7 @@ pub(crate) fn load_presets() -> Vec<PresetEntry> {
         if let Ok(preset) = crate::preset::parse(text) {
             presets.push(PresetEntry {
                 file: file.to_string(),
+                display: parse_name(text).unwrap_or_else(|| file.to_string()),
                 preset,
             });
         }
