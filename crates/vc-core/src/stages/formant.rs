@@ -279,11 +279,24 @@ impl FormantStage {
         self.env_im.fill(0.0);
         self.fft.run(&mut self.env_re, &mut self.env_im, false);
 
+        // Do not boost bins that are essentially empty. With the wider
+        // ±24 dB gain range this otherwise amplifies room noise and makes the
+        // shifted voice sound gritty.
+        let max_magnitude = (0..=FFT_SIZE / 2)
+            .map(|k| self.re[k].hypot(self.im[k]))
+            .fold(0.0f32, f32::max);
+        let silence_floor = max_magnitude * 1e-4;
+
         let ratio = 2f32.powf(self.semitones.current() / 12.0);
         for k in 0..=FFT_SIZE / 2 {
             let source = k as f32 / ratio;
             let warped = interpolate(&self.env_re, source);
-            let target = (warped - self.env_re[k]).exp().clamp(GAIN_MIN, GAIN_MAX);
+            let input_magnitude = self.re[k].hypot(self.im[k]);
+            let target = if max_magnitude > 1e-20 && input_magnitude < silence_floor {
+                1.0
+            } else {
+                (warped - self.env_re[k]).exp().clamp(GAIN_MIN, GAIN_MAX)
+            };
             let state = &mut self.gain_state[k];
             *state += (target - *state) * GAIN_SMOOTHING;
             let gain = *state;

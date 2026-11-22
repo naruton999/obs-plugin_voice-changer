@@ -26,6 +26,7 @@ const FINE_RADIUS: i32 = 3;
 /// inside each grain while advancing the grain start by one hop made the
 /// overlap-add combine different input times (heard as two or three voices).
 pub(crate) struct PitchStage {
+    sample_rate: f32,
     window: usize,
     hop: usize,
     search: i32,
@@ -33,6 +34,10 @@ pub(crate) struct PitchStage {
     window_fn: Vec<f32>,
     hop_buf: Vec<f32>,
     corr_buf: Vec<f32>,
+
+    /// Anti-alias lowpass applied to the stretched signal before resampling.
+    lowpass: Lowpass,
+    lowpass_cutoff: f32,
 
     semitones: LinearSmoother,
 
@@ -82,6 +87,7 @@ impl PitchStage {
         let fifo_cap = max_block_size + window + 2 * hop;
 
         let mut stage = Self {
+            sample_rate,
             window,
             hop,
             search,
@@ -89,6 +95,8 @@ impl PitchStage {
             window_fn,
             hop_buf: vec![0.0; hop],
             corr_buf: vec![0.0; corr_len],
+            lowpass: Lowpass::default(),
+            lowpass_cutoff: 0.0,
             semitones: LinearSmoother::new(0.0, ramp),
             history: Vec::with_capacity(history_cap),
             history_base: 0,
@@ -135,6 +143,8 @@ impl PitchStage {
         self.stretched_base = 0;
         self.resample_pos = 0.0;
         self.out_fifo.clear();
+        self.lowpass.bypass();
+        self.lowpass_cutoff = 0.0;
         self.semitones.snap(self.semitones.target());
         self.delay_remaining = self.latency_samples();
     }
@@ -169,11 +179,21 @@ impl PitchStage {
             reference_energy += value * value;
         }
 
-        let mut best_offset = 0i32;
+        // Continuity target: the previous grain's next hop in the input.
+        // Searching the whole ±10 ms range lets the best match jump by one
+        // pitch period, which is heard as a slow wobble. Restrict the search
+        // to ±5 ms around the expected continuation.
+        let expected =
+            (previous + self.hop as f64 - nominal).clamp(-(self.search as f64), self.search as f64);
+        let half = (self.search as f64 * 0.5).max(1.0);
+        let search_low = (expected - half).max(-(self.search as f64)).floor() as i32;
+        let search_high = (expected + half).min(self.search as f64).ceil() as i32;
+
+        let mut best_offset = search_low;
         let mut best = f32::NEG_INFINITY;
 
-        let mut offset = -self.search;
-        while offset <= self.search {
+        let mut offset = search_low;
+        while offset <= search_high {
             let value = self.correlation(nominal + offset as f64, reference_energy);
             if value > best {
                 best = value;
@@ -182,8 +202,8 @@ impl PitchStage {
             offset += COARSE_STEP;
         }
 
-        let low = (best_offset - FINE_RADIUS).max(-self.search);
-        let high = (best_offset + FINE_RADIUS).min(self.search);
+        let low = (best_offset - FINE_RADIUS).max(search_low);
+        let high = (best_offset + FINE_RADIUS).min(search_high);
         let mut offset = low;
         while offset <= high {
             let value = self.correlation(nominal + offset as f64, reference_energy);
@@ -251,11 +271,18 @@ impl PitchStage {
             }
         }
 
-        // Four Hann windows at 75% overlap sum to 2.0.
-        for value in self.hop_buf.iter_mut() {
-            self.stretched.push(*value * 0.5);
-            *value = 0.0;
+        // Four Hann windows at 75% overlap sum to 2.0. The lowpass removes
+        // the content that would alias when the stretched signal is resampled
+        // upward by `alpha`.
+        let (hop_buf, lowpass, stretched) =
+            (&mut self.hop_buf, &mut self.lowpass, &mut self.stretched);
+        for value in hop_buf.iter_mut() {
+            *value *= 0.5;
         }
+        for value in hop_buf.iter() {
+            stretched.push(lowpass.process(*value));
+        }
+        hop_buf.fill(0.0);
 
         self.emit_hop += 1;
         self.analysis_pos += self.hop as f64 / ratio;
@@ -382,6 +409,21 @@ impl DspStage for PitchStage {
             }
         }
 
+        let ratio = self.current_ratio();
+        let cutoff = if ratio > 1.05 {
+            (0.48 * self.sample_rate as f64 / ratio) as f32
+        } else {
+            0.0
+        };
+        if (cutoff - self.lowpass_cutoff).abs() > 50.0 {
+            self.lowpass_cutoff = cutoff;
+            if cutoff > 0.0 {
+                self.lowpass.set_lowpass(self.sample_rate, cutoff);
+            } else {
+                self.lowpass.bypass();
+            }
+        }
+
         while self.emit_next_hop() {}
 
         let alpha = self.current_ratio();
@@ -397,6 +439,86 @@ impl DspStage for PitchStage {
                 *sample = self.out_fifo.pop_front().unwrap_or(0.0);
             }
         }
+    }
+}
+
+#[derive(Clone, Copy, Default)]
+struct Biquad {
+    b0: f32,
+    b1: f32,
+    b2: f32,
+    a1: f32,
+    a2: f32,
+    z1: f32,
+    z2: f32,
+}
+
+impl Biquad {
+    fn set_lowpass(&mut self, sample_rate: f32, cutoff: f32) {
+        let pi = std::f32::consts::PI;
+        let w0 = 2.0 * pi * cutoff / sample_rate;
+        let cos = w0.cos();
+        let sin = w0.sin();
+        let q = std::f32::consts::FRAC_1_SQRT_2;
+        let alpha = sin / (2.0 * q);
+        let a0 = 1.0 + alpha;
+
+        self.b0 = (1.0 - cos) * 0.5 / a0;
+        self.b1 = (1.0 - cos) / a0;
+        self.b2 = self.b0;
+        self.a1 = -2.0 * cos / a0;
+        self.a2 = (1.0 - alpha) / a0;
+        self.z1 = 0.0;
+        self.z2 = 0.0;
+    }
+
+    fn process(&mut self, x: f32) -> f32 {
+        let y = self.b0 * x + self.z1;
+        self.z1 = self.b1 * x - self.a1 * y + self.z2;
+        self.z2 = self.b2 * x - self.a2 * y;
+        if self.z1.abs() < 1e-30 {
+            self.z1 = 0.0;
+        }
+        if self.z2.abs() < 1e-30 {
+            self.z2 = 0.0;
+        }
+        y
+    }
+
+    fn reset(&mut self) {
+        self.z1 = 0.0;
+        self.z2 = 0.0;
+    }
+}
+
+/// Two cascaded second-order sections. The stretched signal is low-passed
+/// before resampling so that content above the decimated Nyquist does not
+/// fold back as a gritty texture.
+#[derive(Clone, Copy, Default)]
+struct Lowpass {
+    first: Biquad,
+    second: Biquad,
+    active: bool,
+}
+
+impl Lowpass {
+    fn set_lowpass(&mut self, sample_rate: f32, cutoff: f32) {
+        self.first.set_lowpass(sample_rate, cutoff);
+        self.second.set_lowpass(sample_rate, cutoff);
+        self.active = true;
+    }
+
+    fn bypass(&mut self) {
+        self.active = false;
+        self.first.reset();
+        self.second.reset();
+    }
+
+    fn process(&mut self, x: f32) -> f32 {
+        if !self.active {
+            return x;
+        }
+        self.second.process(self.first.process(x))
     }
 }
 
@@ -539,6 +661,22 @@ mod tests {
             let expected = stage.history[i];
             assert!((stage.read_abs(i as f64) - expected).abs() < 1e-6);
         }
+    }
+
+    #[test]
+    fn anti_alias_lowpass_suppresses_out_of_band_alias() {
+        let sample_rate = 48_000.0;
+        // 15 kHz shifted up by 12 semitones would land at 30 kHz and alias to
+        // 18 kHz. The low-pass before resampling must keep that alias low.
+        let input = sine(15_000.0, sample_rate, sample_rate as usize);
+        let mut stage = PitchStage::new(sample_rate, 4096);
+        stage.set_semitones(12.0);
+        let out = process_blocks(&mut stage, &input, 480);
+
+        let start = (0.30 * sample_rate) as usize;
+        let end = (0.90 * sample_rate) as usize;
+        let alias = goertzel(&out[start..end], 18_000.0, sample_rate);
+        assert!(alias < 0.1, "alias = {alias}");
     }
 
     #[test]

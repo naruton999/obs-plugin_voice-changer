@@ -789,7 +789,7 @@ pub(crate) fn load_presets() -> Vec<PresetEntry> {
     presets
 }
 
-unsafe fn read_params(settings: *mut ObsData) -> Params {
+pub(crate) unsafe fn read_params(settings: *mut ObsData) -> Params {
     Params {
         input_gain_db: unsafe { ffi::obs_data_get_double(settings, c"input_gain_db".as_ptr()) }
             as f32,

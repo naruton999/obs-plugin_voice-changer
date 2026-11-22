@@ -16,26 +16,14 @@ use crate::ui;
 const MAX_BLOCK_FRAMES: usize = 4096;
 const DEFAULT_SAMPLE_RATE: f32 = 48_000.0;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Layout {
-    Mono,
-    StereoEqual,
-    /// The channels are near-identical (a mono source duplicated by OBS).
-    /// Process the mid signal once so the two channels keep the same pitch
-    /// phase; independent grain lattices would sound like two or three voices.
-    StereoLinked,
-    StereoDifferent,
-}
-
 pub(crate) struct FilterData {
-    chains: [VoiceChanger; 2],
+    chain: VoiceChanger,
     pub(crate) params: AtomicParams,
-    last_layout: Layout,
     pub(crate) source: *mut ObsSource,
     pub(crate) sample_rate: f32,
     pub(crate) presets: Vec<PresetEntry>,
     pub(crate) latency: AtomicU64,
-    /// Mid-signal scratch buffer for linked stereo. Allocated in `create`.
+    /// Mid-signal scratch buffer for stereo. Allocated in `create`.
     scratch: Vec<f32>,
 }
 
@@ -59,18 +47,23 @@ unsafe extern "C" fn get_name(_type_data: *mut c_void) -> *const c_char {
     c"ボイスチェンジャー".as_ptr()
 }
 
-unsafe extern "C" fn create(_settings: *mut ObsData, source: *mut ObsSource) -> *mut c_void {
+unsafe extern "C" fn create(settings: *mut ObsData, source: *mut ObsSource) -> *mut c_void {
     guard(ptr::null_mut(), || {
         let sample_rate = audio_sample_rate();
-        let params = Params::default();
+
+        // OBS passes the saved scene-collection settings to `create` but does
+        // not always call `update` afterwards. Read them here, otherwise the
+        // plugin starts with defaults on every OBS launch even though the
+        // properties UI shows the saved values.
+        let params = if settings.is_null() {
+            Params::default()
+        } else {
+            unsafe { ui::read_params(settings) }.sanitized()
+        };
         let latency = estimated_latency(sample_rate, &params);
         Box::into_raw(Box::new(FilterData {
-            chains: [
-                VoiceChanger::new(sample_rate, MAX_BLOCK_FRAMES),
-                VoiceChanger::new(sample_rate, MAX_BLOCK_FRAMES),
-            ],
+            chain: VoiceChanger::new(sample_rate, MAX_BLOCK_FRAMES),
             params: AtomicParams::new(params),
-            last_layout: Layout::Mono,
             source,
             sample_rate,
             presets: Vec::new(),
@@ -103,32 +96,13 @@ unsafe extern "C" fn filter_audio(
         process(filter, audio_ref);
         filter
             .latency
-            .store(filter.chains[0].latency_samples() as u64, Ordering::Relaxed);
+            .store(filter.chain.latency_samples() as u64, Ordering::Relaxed);
         audio
     })
 }
 
 fn estimated_latency(sample_rate: f32, params: &Params) -> usize {
     vc_core::estimated_latency_samples(sample_rate, params)
-}
-
-/// Returns true when the two channels carry almost the same signal. OBS often
-/// duplicates a mono microphone into both planes with tiny differences; those
-/// must be processed together or the two pitch-shifted copies beat against
-/// each other.
-fn linked_channels(left: &[f32], right: &[f32]) -> bool {
-    let mut dot = 0.0f64;
-    let mut left_energy = 0.0f64;
-    let mut right_energy = 0.0f64;
-    for (&l, &r) in left.iter().zip(right) {
-        dot += l as f64 * r as f64;
-        left_energy += l as f64 * l as f64;
-        right_energy += r as f64 * r as f64;
-    }
-    if left_energy < 1e-12 || right_energy < 1e-12 {
-        return true;
-    }
-    dot / (left_energy.sqrt() * right_energy.sqrt()) > 0.98
 }
 
 fn audio_sample_rate() -> f32 {
@@ -163,72 +137,38 @@ fn process(filter: &mut FilterData, audio: &mut ObsAudioData) {
     }
 
     let params = filter.params.load();
-    filter.chains[0].set_params(params);
+    filter.chain.set_params(params);
 
     if channels == 1 {
-        if filter.last_layout != Layout::Mono {
-            filter.chains[1].reset();
-            filter.last_layout = Layout::Mono;
-        }
         let buf = unsafe { slice::from_raw_parts_mut(planes[0], frames) };
-        filter.chains[0].process(buf);
+        filter.chain.process(buf);
         return;
     }
 
+    // A voice changer is a mono effect. Always process the mid signal and copy
+    // it to both planes. Processing L/R independently gives each channel a
+    // different grain lattice, which is heard as a chorus or a slow wobble.
     let left = planes[0];
     let right = planes[1];
-    let layout = if left == right {
-        Layout::StereoEqual
-    } else {
-        let left_slice = unsafe { slice::from_raw_parts(left, frames) };
-        let right_slice = unsafe { slice::from_raw_parts(right, frames) };
-        if left_slice == right_slice {
-            Layout::StereoEqual
-        } else if linked_channels(left_slice, right_slice) {
-            Layout::StereoLinked
-        } else {
-            Layout::StereoDifferent
-        }
-    };
-
-    if layout != filter.last_layout {
-        // Do not carry stale filter state across a layout change.
-        filter.chains[1].reset();
-        filter.last_layout = layout;
+    if left == right {
+        let buf = unsafe { slice::from_raw_parts_mut(left, frames) };
+        filter.chain.process(buf);
+        return;
     }
 
-    match layout {
-        Layout::StereoEqual => {
-            let buf = unsafe { slice::from_raw_parts_mut(left, frames) };
-            filter.chains[0].process(buf);
-            if left != right {
-                unsafe { ptr::copy(left, right, frames) };
-            }
+    let left_buf = unsafe { slice::from_raw_parts_mut(left, frames) };
+    let right_buf = unsafe { slice::from_raw_parts_mut(right, frames) };
+    let (chain, scratch) = (&mut filter.chain, &mut filter.scratch);
+    let mut offset = 0;
+    while offset < frames {
+        let len = (frames - offset).min(scratch.len());
+        for i in 0..len {
+            scratch[i] = 0.5 * (left_buf[offset + i] + right_buf[offset + i]);
         }
-        Layout::StereoLinked => {
-            let left_buf = unsafe { slice::from_raw_parts_mut(left, frames) };
-            let right_buf = unsafe { slice::from_raw_parts_mut(right, frames) };
-            let (chains, scratch) = (&mut filter.chains, &mut filter.scratch);
-            let mut offset = 0;
-            while offset < frames {
-                let len = (frames - offset).min(scratch.len());
-                for i in 0..len {
-                    scratch[i] = 0.5 * (left_buf[offset + i] + right_buf[offset + i]);
-                }
-                chains[0].process(&mut scratch[..len]);
-                let destination = offset..offset + len;
-                left_buf[destination.clone()].copy_from_slice(&scratch[..len]);
-                right_buf[destination].copy_from_slice(&scratch[..len]);
-                offset += len;
-            }
-        }
-        Layout::StereoDifferent => {
-            filter.chains[1].set_params(params);
-            let left_buf = unsafe { slice::from_raw_parts_mut(left, frames) };
-            filter.chains[0].process(left_buf);
-            let right_buf = unsafe { slice::from_raw_parts_mut(right, frames) };
-            filter.chains[1].process(right_buf);
-        }
-        Layout::Mono => {}
+        chain.process(&mut scratch[..len]);
+        let destination = offset..offset + len;
+        left_buf[destination.clone()].copy_from_slice(&scratch[..len]);
+        right_buf[destination].copy_from_slice(&scratch[..len]);
+        offset += len;
     }
 }
