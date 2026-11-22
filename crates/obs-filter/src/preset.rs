@@ -213,6 +213,7 @@ mod tests {
             include_str!("../../../presets/sharp-female.toml"),
             include_str!("../../../presets/migrated-female.toml"),
             include_str!("../../../presets/standard-female.toml"),
+            include_str!("../../../presets/high-quality-female.toml"),
             include_str!("../../../presets/natural-female.toml"),
             include_str!("../../../presets/bright-female.toml"),
             include_str!("../../../presets/max-female.toml"),

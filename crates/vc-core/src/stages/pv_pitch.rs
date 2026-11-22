@@ -3,6 +3,7 @@ use std::f32::consts::{PI, TAU};
 
 use crate::smooth::LinearSmoother;
 use crate::stages::DspStage;
+use crate::stages::lowpass::Lowpass;
 
 /// STFT size. 2048 points is about 43 ms at 48 kHz.
 const FFT_SIZE: usize = 2048;
@@ -42,6 +43,9 @@ pub(crate) struct PhaseVocoderPitch {
     fft: Fft,
     window: Vec<f32>,
     lifter: usize,
+    sample_rate: f32,
+    lowpass: Lowpass,
+    lowpass_cutoff: f32,
 
     semitones: LinearSmoother,
     formant_semitones: LinearSmoother,
@@ -110,6 +114,9 @@ impl PhaseVocoderPitch {
             fft: Fft::new(FFT_SIZE),
             window,
             lifter,
+            sample_rate,
+            lowpass: Lowpass::default(),
+            lowpass_cutoff: 0.0,
             semitones: LinearSmoother::new(0.0, ramp),
             formant_semitones: LinearSmoother::new(0.0, ramp),
             first_frame: true,
@@ -198,6 +205,8 @@ impl PhaseVocoderPitch {
         self.resample_pos = 0.0;
         self.level_gain = 1.0;
         self.out_fifo.clear();
+        self.lowpass.bypass();
+        self.lowpass_cutoff = 0.0;
         self.semitones.snap(self.semitones.target());
         self.formant_semitones.snap(self.formant_semitones.target());
         self.delay_remaining = self.latency_samples();
@@ -291,7 +300,8 @@ impl PhaseVocoderPitch {
             self.acc[i] += self.re[i] * self.window[i] * OUTPUT_SCALE * self.level_gain;
         }
         for i in 0..HOP {
-            self.stretched.push(self.acc[i]);
+            let value = self.acc[i];
+            self.stretched.push(self.lowpass.process(value));
         }
         self.acc.copy_within(HOP..FFT_SIZE + HOP, 0);
         for value in &mut self.acc[FFT_SIZE..] {
@@ -473,6 +483,20 @@ impl DspStage for PhaseVocoderPitch {
         let ratio = 2f32.powf(self.semitones.current() / 12.0) as f64;
         let analysis_hop = ((HOP as f64 / ratio).round() as usize).max(1);
         let alpha = HOP as f64 / analysis_hop as f64;
+
+        let cutoff = if ratio > 1.05 {
+            (0.48 * self.sample_rate as f64 / ratio) as f32
+        } else {
+            0.0
+        };
+        if (cutoff - self.lowpass_cutoff).abs() > 50.0 {
+            self.lowpass_cutoff = cutoff;
+            if cutoff > 0.0 {
+                self.lowpass.set_lowpass(self.sample_rate, cutoff);
+            } else {
+                self.lowpass.bypass();
+            }
+        }
 
         while self.analysis_pos + FFT_SIZE as f64 <= self.input_len as f64 {
             let start = self.analysis_pos.round() as u64;

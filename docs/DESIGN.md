@@ -86,7 +86,7 @@ OBS 音声スレッド
 │  ├─ vc-core/                 # DSP 本体（FFI なし・テスト可能）
 │  └─ obs-filter/              # libobs バインディング + filter_audio（cdylib）
 ├─ presets/
-│  └─ standard-female.toml
+│  └─ high-quality-female.toml
 ├─ data/obs-plugins/<module>/
 │  ├─ presets/
 │  └─ locale/
@@ -242,7 +242,7 @@ in ─► InputGain ─► HPF ─► Gate(既定 OFF) ─► Pitch(WSOLA 既定
 
 ```
 ┌ ボイスチェンジャー ──────────────────────────┐
-│ プリセット      [ standard-female     ▼ ]     │
+│ プリセット      [ high-quality-female ▼ ]     │
 │                          [プリセットを適用]   │
 │ ─────────────────────────────────────────── │
 │ ☑ フォルマント独立制御                        │
@@ -253,9 +253,9 @@ in ─► InputGain ─► HPF ─► Gate(既定 OFF) ─► Pitch(WSOLA 既定
 │ ☐ ゲート  Threshold [-45.0] dB                │
 │ 出力ゲイン [──●──] +2.0 dB                    │
 │ ─────────────────────────────────────────── │
-│ ☐ 高品質モード（フェーズボコーダ）            │
+│ ☑ 高品質モード（フェーズボコーダ）            │
 │ ☐ 遅延維持バイパス                            │
-│ 概算遅延 約 61ms      v0.1.0                  │
+│ 概算遅延 約 64ms      v0.1.0                  │
 └──────────────────────────────────────────────┘
 ```
 
@@ -267,8 +267,8 @@ in ─► InputGain ─► HPF ─► Gate(既定 OFF) ─► Pitch(WSOLA 既定
 | 概算遅延 | ラベル | フォルマント ON/OFF で変わる |
 | バージョン | ラベル | 不具合報告用 |
 
-図は推奨プリセット `standard-female` 適用時の例。フォルマント処理の有効/無効は既定 ON、
-独立制御は既定 OFF、高品質モード（PV）は既定 OFF（WSOLA）。
+図は推奨プリセット `high-quality-female` 適用時の例。フォルマント処理の有効/無効は既定 ON、
+独立制御は既定 OFF、高品質モード（PV）はプリセットで ON になる。
 
 - 数値は必ず単位付き。
 - 変更は即時反映（`update`）。
@@ -281,7 +281,7 @@ in ─► InputGain ─► HPF ─► Gate(既定 OFF) ─► Pitch(WSOLA 既定
 | 項目 | 仕様 |
 |---|---|
 | 形式 | TOML |
-| 同梱 | `standard-female.toml`（推奨）ほか |
+| 同梱 | `high-quality-female.toml`（推奨）ほか |
 | 配置 | `data/obs-plugins/<module>/presets/*.toml`（`obs_module_file` で解決） |
 | 読込 | プラグイン読込時と `update` 時（メインスレッド） |
 | 未知フィールド | 無視（前方互換） |
@@ -292,9 +292,9 @@ in ─► InputGain ─► HPF ─► Gate(既定 OFF) ─► Pitch(WSOLA 既定
 
 ```toml
 schema_version = 1
-name = "standard-female"
-description = "検証済みの標準女性声（ピッチ +12 / フォルマント +4.4 / トーン EQ / コンプ）"
-created = "2026-11-21"
+name = "high-quality-female"
+description = "高品質モード（位相ロックPV）版の推奨（ピッチ +12 / フォルマント +4.4 / トーン EQ / コンプ）"
+created = "2026-11-22"
 
 [input]
 gain_db = 0.0
@@ -310,7 +310,7 @@ hold_ms = 40.0
 
 [pitch]
 semitones = 12.0
-phase_vocoder = false
+phase_vocoder = true
 
 [formant]
 enabled = true
@@ -367,7 +367,7 @@ comp = { threshold_db = -18.0, ratio = 3.0, attack_ms = 8.0, release_ms = 150.0,
 Windows:
   obs-plugins/64bit/obs-plugin_voice-changer.dll
   data/obs-plugins/obs-plugin_voice-changer/
-    presets/standard-female.toml
+    presets/high-quality-female.toml
     locale/en-US.ini
     locale/ja-JP.ini
 
@@ -376,7 +376,7 @@ macOS:
     Contents/MacOS/obs-plugin_voice-changer
     Contents/Info.plist
   data/obs-plugins/obs-plugin_voice-changer/
-    presets/standard-female.toml
+    presets/high-quality-female.toml
     locale/en-US.ini
     locale/ja-JP.ini
 ```

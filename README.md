@@ -14,7 +14,7 @@ v0.1.0 開発中。
 | フォルマント | 独立 STFT 段（テーパー付きリフタ、必要なときだけ実行） |
 | ステレオ | 2ch は Mid を1回処理して左右へコピー（左右の位相ずれ・揺れ防止） |
 | ゲート | ダウンワードエキスパンダ実装済み（既定 OFF） |
-| UI・プリセット読込 | 実装済み（`standard-female` ほか） |
+| UI・プリセット読込 | 実装済み（`high-quality-female` ほか） |
 
 ## 構成
 
@@ -46,7 +46,7 @@ cargo fmt --check
 
 `filter_audio` は `vc-core` のチェーン
 （入力ゲイン → HPF → ゲート → ピッチ → フォルマント → トーン EQ → コンプ → 出力ゲイン → ソフトクリップ）を呼ぶ。
-既定は WSOLA（時間伸縮＋リサンプル、正規化相関、継続位置の周辺だけを探索、Catmull-Rom 補間、アップシフト時のリサンプル前ローパス）で、フォルマントは独立 STFT 段（テーパー付きケプストラムリフタ、無音ビンを増幅しない床、ゆっくりしたレベル補正）で動かす。高品質が必要な場合は位相ロック付きフェーズボコーダに切り替えられる。ゲートはダウンワードエキスパンダで実装済み（既定 OFF）。2ch は Mid を1回処理して左右へコピーする。
+既定は WSOLA（時間伸縮＋リサンプル、正規化相関、Catmull-Rom 補間、アップシフト時のリサンプル前ローパス）で、フォルマントは独立 STFT 段（テーパー付きケプストラムリフタ、無音ビンを増幅しない床、ゆっくりしたレベル補正）で動かす。高品質が必要な場合は位相ロック付きフェーズボコーダに切り替えられる。ゲートはダウンワードエキスパンダで実装済み（既定 OFF）。2ch は Mid を1回処理して左右へコピーする。
 設定は OBS のプロパティで変更し、シーンコレクションに保存される。
 
 ### プロパティ
@@ -75,7 +75,8 @@ cargo fmt --check
 
 | ファイル | 内容 |
 |---|---|
-| `standard-female.toml` | **推奨・検証済み**（ピッチ +12 / フォルマント +4.4 / トーン EQ / コンプ / 出力 +2.0dB） |
+| `high-quality-female.toml` | **推奨（高品質モード/PV）**（ピッチ +12 / フォルマント +4.4 / トーン EQ / コンプ / 出力 +2.0dB） |
+| `standard-female.toml` | WSOLA 版の標準（同じ音色設定、`phase_vocoder=false`） |
 | `sharp-female.toml` | 控えめな女性化（ピッチ +3.5 / フォルマント +2.5） |
 | `natural-female.toml` | 別案（ピッチ +11 / フォルマント +6.0 / トーン控えめ） |
 | `bright-female.toml` | 別案（ピッチ +12 / フォルマント +7.0 / 軽いコンプ） |
@@ -94,14 +95,15 @@ cargo fmt --check
 | 高域 EQ | +0〜+6 dB | 標準は +6。歯擦音が気になる場合は +2〜+3 に下げる |
 | コンプ | ratio 2〜3 | かけすぎると「放送声」になる |
 
-**`standard-female` が検証済みの推奨プリセット**。`natural-female` / `bright-female` / `max-female`
-は別案、`migrated-female` は `standard-female` の旧名（互換用）。
+**`high-quality-female` が推奨プリセット**（高品質モード/PV）。`standard-female` は同じ音色設定の
+WSOLA 版、`natural-female` / `bright-female` / `max-female` は別案、`migrated-female` は
+`standard-female` の旧名（互換用）。
 
 オフラインで聴き比べる場合（既定は WSOLA、`--pv` でフェーズボコーダ）:
 
 ```bash
 cargo run -p vc-core --example render -- \
-  wav/dry.wav wav/standard-female.wav \
+  wav/dry.wav wav/high-quality-female.wav --pv \
   --pitch 12 --formant 4.4 --tone-low -3 --tone-mid 2 --tone-high 6 \
   --comp --threshold -18 --ratio 3 --attack 8 --release 150 --makeup 2 \
   --out-gain 2 --hpf 100

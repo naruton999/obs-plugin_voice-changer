@@ -6,8 +6,9 @@ use crate::stages::DspStage;
 
 /// STFT size. The design fixes 1024 points at 48 kHz.
 const FFT_SIZE: usize = 1024;
-/// STFT hop (75% overlap).
-const HOP: usize = 256;
+/// STFT hop (87.5% overlap). The finer hop smooths the overlap-add and
+/// reduces the frame-rate amplitude modulation of the formant envelope.
+const HOP: usize = 128;
 /// Parameter smoothing time.
 const SMOOTHING_SECONDS: f64 = 0.050;
 /// Internal range. The chain clamps the desired total formant shift to ±7
@@ -16,13 +17,13 @@ const MAX_SHIFT_SEMITONES: f32 = 36.0;
 /// Clamp the spectral gain to avoid boosting near-silent bins excessively.
 const GAIN_MIN: f32 = 0.063;
 const GAIN_MAX: f32 = 16.0;
-/// Per-frame smoothing of the envelope gain (about 15 ms at 48 kHz).
-const GAIN_SMOOTHING: f32 = 0.35;
+/// Per-frame smoothing of the envelope gain (about 26 ms at 48 kHz).
+const GAIN_SMOOTHING: f32 = 0.2;
 /// Slow level matching (about 1 s at 48 kHz). The previous per-frame AGC
 /// pumped on transients and flattened the dynamics of the voice.
 const LEVEL_SMOOTHING: f32 = 0.005;
-/// Four Hann^2 windows at 75% overlap sum to 1.5.
-const OUTPUT_SCALE: f32 = 2.0 / 3.0;
+/// Eight Hann^2 windows at 87.5% overlap sum to 3.0.
+const OUTPUT_SCALE: f32 = 1.0 / 3.0;
 
 struct Fft {
     tw_re: Vec<f32>,

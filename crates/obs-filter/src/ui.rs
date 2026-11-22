@@ -14,7 +14,7 @@ const LOG_INFO: c_int = 300;
 
 /// Presets compiled into the plugin so the list is never empty, even when the
 /// data folder or preset files are missing.
-const BUILTIN_PRESETS: [(&str, &str); 6] = [
+const BUILTIN_PRESETS: [(&str, &str); 7] = [
     (
         "sharp-female",
         include_str!("../../../presets/sharp-female.toml"),
@@ -26,6 +26,10 @@ const BUILTIN_PRESETS: [(&str, &str); 6] = [
     (
         "standard-female",
         include_str!("../../../presets/standard-female.toml"),
+    ),
+    (
+        "high-quality-female",
+        include_str!("../../../presets/high-quality-female.toml"),
     ),
     (
         "natural-female",
@@ -163,7 +167,7 @@ pub(crate) unsafe extern "C" fn get_defaults(settings: *mut ObsData) {
             ffi::obs_data_set_default_string(
                 settings,
                 c"preset".as_ptr(),
-                c"standard-female".as_ptr(),
+                c"high-quality-female".as_ptr(),
             );
         }
     });

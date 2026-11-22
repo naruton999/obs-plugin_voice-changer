@@ -3,6 +3,7 @@ use std::f64::consts::TAU;
 
 use crate::smooth::LinearSmoother;
 use crate::stages::DspStage;
+use crate::stages::lowpass::Lowpass;
 
 /// Window length as a fraction of the sample rate (40 ms).
 const WINDOW_SECONDS: f64 = 0.040;
@@ -179,21 +180,14 @@ impl PitchStage {
             reference_energy += value * value;
         }
 
-        // Continuity target: the previous grain's next hop in the input.
-        // Searching the whole ±10 ms range lets the best match jump by one
-        // pitch period, which is heard as a slow wobble. Restrict the search
-        // to ±5 ms around the expected continuation.
-        let expected =
-            (previous + self.hop as f64 - nominal).clamp(-(self.search as f64), self.search as f64);
-        let half = (self.search as f64 * 0.5).max(1.0);
-        let search_low = (expected - half).max(-(self.search as f64)).floor() as i32;
-        let search_high = (expected + half).min(self.search as f64).ceil() as i32;
-
-        let mut best_offset = search_low;
+        // Search the whole ±10 ms range. Restricting this to ±5 ms around the
+        // expected continuation was measured to increase the amplitude
+        // modulation of the WSOLA output on real speech.
+        let mut best_offset = 0i32;
         let mut best = f32::NEG_INFINITY;
 
-        let mut offset = search_low;
-        while offset <= search_high {
+        let mut offset = -self.search;
+        while offset <= self.search {
             let value = self.correlation(nominal + offset as f64, reference_energy);
             if value > best {
                 best = value;
@@ -202,8 +196,8 @@ impl PitchStage {
             offset += COARSE_STEP;
         }
 
-        let low = (best_offset - FINE_RADIUS).max(search_low);
-        let high = (best_offset + FINE_RADIUS).min(search_high);
+        let low = (best_offset - FINE_RADIUS).max(-self.search);
+        let high = (best_offset + FINE_RADIUS).min(self.search);
         let mut offset = low;
         while offset <= high {
             let value = self.correlation(nominal + offset as f64, reference_energy);
@@ -439,86 +433,6 @@ impl DspStage for PitchStage {
                 *sample = self.out_fifo.pop_front().unwrap_or(0.0);
             }
         }
-    }
-}
-
-#[derive(Clone, Copy, Default)]
-struct Biquad {
-    b0: f32,
-    b1: f32,
-    b2: f32,
-    a1: f32,
-    a2: f32,
-    z1: f32,
-    z2: f32,
-}
-
-impl Biquad {
-    fn set_lowpass(&mut self, sample_rate: f32, cutoff: f32) {
-        let pi = std::f32::consts::PI;
-        let w0 = 2.0 * pi * cutoff / sample_rate;
-        let cos = w0.cos();
-        let sin = w0.sin();
-        let q = std::f32::consts::FRAC_1_SQRT_2;
-        let alpha = sin / (2.0 * q);
-        let a0 = 1.0 + alpha;
-
-        self.b0 = (1.0 - cos) * 0.5 / a0;
-        self.b1 = (1.0 - cos) / a0;
-        self.b2 = self.b0;
-        self.a1 = -2.0 * cos / a0;
-        self.a2 = (1.0 - alpha) / a0;
-        self.z1 = 0.0;
-        self.z2 = 0.0;
-    }
-
-    fn process(&mut self, x: f32) -> f32 {
-        let y = self.b0 * x + self.z1;
-        self.z1 = self.b1 * x - self.a1 * y + self.z2;
-        self.z2 = self.b2 * x - self.a2 * y;
-        if self.z1.abs() < 1e-30 {
-            self.z1 = 0.0;
-        }
-        if self.z2.abs() < 1e-30 {
-            self.z2 = 0.0;
-        }
-        y
-    }
-
-    fn reset(&mut self) {
-        self.z1 = 0.0;
-        self.z2 = 0.0;
-    }
-}
-
-/// Two cascaded second-order sections. The stretched signal is low-passed
-/// before resampling so that content above the decimated Nyquist does not
-/// fold back as a gritty texture.
-#[derive(Clone, Copy, Default)]
-struct Lowpass {
-    first: Biquad,
-    second: Biquad,
-    active: bool,
-}
-
-impl Lowpass {
-    fn set_lowpass(&mut self, sample_rate: f32, cutoff: f32) {
-        self.first.set_lowpass(sample_rate, cutoff);
-        self.second.set_lowpass(sample_rate, cutoff);
-        self.active = true;
-    }
-
-    fn bypass(&mut self) {
-        self.active = false;
-        self.first.reset();
-        self.second.reset();
-    }
-
-    fn process(&mut self, x: f32) -> f32 {
-        if !self.active {
-            return x;
-        }
-        self.second.process(self.first.process(x))
     }
 }
 
