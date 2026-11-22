@@ -37,13 +37,15 @@ fn run() -> Result<(), String> {
     let positional: Vec<&String> = args.iter().filter(|arg| !arg.starts_with("--")).collect();
     if positional.len() < 2 {
         return Err(
-            "usage: psola <input.wav> <output.wav> [--pitch 11] [--formant 8] [--raw]".to_string(),
+            "usage: psola <input.wav> <output.wav> [--pitch 11] [--formant 8] [--grain-formant 3] [--raw]"
+                .to_string(),
         );
     }
     let input_path = positional[0];
     let output_path = positional[1];
     let semitones = value(&args, "--pitch", 11.0);
     let formant = value(&args, "--formant", 0.0);
+    let grain_formant = value(&args, "--grain-formant", 0.0);
     let raw = args.iter().any(|arg| arg == "--raw");
 
     let wav = read_wav(input_path)?;
@@ -65,7 +67,14 @@ fn run() -> Result<(), String> {
             voiced.len()
         );
     }
-    let mut shifted = psola(&mono, sr, &f0, &marks, semitones);
+    let mut shifted = psola(
+        &mono,
+        sr,
+        &f0,
+        &marks,
+        semitones,
+        2f32.powf(grain_formant / 12.0),
+    );
 
     if formant.abs() > 1e-6 {
         let mut chain = VoiceChanger::new(sr as f32, 2048);
@@ -105,7 +114,7 @@ fn run() -> Result<(), String> {
     let stereo = interleave(&shifted, wav.channels);
     write_wav(output_path, sr, wav.channels, &stereo)?;
     println!(
-        "{}: {} Hz, {} ch, {} frames -> {} (pitch {:.1}, formant {:.1}, marks {})",
+        "{}: {} Hz, {} ch, {} frames -> {} (pitch {:.1}, formant {:.1}, grain formant {:.1}, marks {})",
         input_path,
         sr,
         wav.channels,
@@ -113,6 +122,7 @@ fn run() -> Result<(), String> {
         output_path,
         semitones,
         formant,
+        grain_formant,
         marks.len()
     );
     Ok(())
@@ -271,7 +281,14 @@ fn build_marks(mono: &[f32], sr: usize, f0: &[f32]) -> Vec<usize> {
     marks
 }
 
-fn psola(mono: &[f32], sr: usize, f0: &[f32], marks: &[usize], semitones: f32) -> Vec<f32> {
+fn psola(
+    mono: &[f32],
+    sr: usize,
+    f0: &[f32],
+    marks: &[usize],
+    semitones: f32,
+    formant_ratio: f32,
+) -> Vec<f32> {
     if marks.is_empty() {
         return mono.to_vec();
     }
@@ -297,24 +314,30 @@ fn psola(mono: &[f32], sr: usize, f0: &[f32], marks: &[usize], semitones: f32) -
         let mark = marks[mark_index] as f32;
 
         let grain_len = (2.0 * input_period).round() as usize;
-        let half = grain_len as f32 * 0.5;
-        let source_start = mark - half;
-        let dest_start = output_position - half;
-        for i in 0..grain_len {
-            let source = source_start + i as f32;
+        let out_len = ((grain_len as f32 / formant_ratio).round() as usize).max(2);
+        let source_half = grain_len as f32 * 0.5;
+        let dest_half = out_len as f32 * 0.5;
+        let source_start = mark - source_half;
+        let dest_start = output_position - dest_half;
+        for i in 0..out_len {
+            let source = source_start + i as f32 * formant_ratio;
             let dest = dest_start + i as f32;
             if source < 0.0 || source >= mono.len() as f32 || dest < 0.0 || dest >= out.len() as f32
             {
                 continue;
             }
-            let window = 0.5
-                - 0.5 * (2.0 * PI * i as f32 / (grain_len.saturating_sub(1)).max(1) as f32).cos();
-            let source_index = source.round() as usize;
+            let window =
+                0.5 - 0.5 * (2.0 * PI * i as f32 / (out_len.saturating_sub(1)).max(1) as f32).cos();
+            let source_floor = source.floor();
+            let fraction = source - source_floor;
+            let s0 = source_floor as usize;
+            let s1 = (s0 + 1).min(mono.len() - 1);
+            let sample = mono[s0] * (1.0 - fraction) + mono[s1] * fraction;
             let dest_index = dest.round() as usize;
-            if source_index >= mono.len() || dest_index >= out.len() {
+            if dest_index >= out.len() {
                 continue;
             }
-            out[dest_index] += mono[source_index] * window;
+            out[dest_index] += sample * window;
             weight[dest_index] += window * window;
         }
         output_position += output_period;
