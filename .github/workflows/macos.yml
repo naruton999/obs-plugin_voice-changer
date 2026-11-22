@@ -45,5 +45,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: obs-plugin_voice-changer-macos-arm64
-          path: dist/obs-plugin_voice-changer.plugin
+          # Uploading a directory keeps only its contents. Use the parent so
+          # the downloaded archive contains the .plugin bundle folder itself.
+          path: dist/
           if-no-files-found: error
