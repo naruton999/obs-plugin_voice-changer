@@ -14,7 +14,7 @@ const LOG_INFO: c_int = 300;
 
 /// Presets compiled into the plugin so the list is never empty, even when the
 /// data folder or preset files are missing.
-const BUILTIN_PRESETS: [(&str, &str); 7] = [
+const BUILTIN_PRESETS: [(&str, &str); 8] = [
     (
         "sharp-female",
         include_str!("../../../presets/sharp-female.toml"),
@@ -30,6 +30,10 @@ const BUILTIN_PRESETS: [(&str, &str); 7] = [
     (
         "high-quality-female",
         include_str!("../../../presets/high-quality-female.toml"),
+    ),
+    (
+        "wet-female",
+        include_str!("../../../presets/wet-female.toml"),
     ),
     (
         "natural-female",
@@ -101,6 +105,7 @@ pub(crate) unsafe extern "C" fn get_defaults(settings: *mut ObsData) {
                 c"phase_vocoder".as_ptr(),
                 defaults.phase_vocoder,
             );
+            ffi::obs_data_set_default_bool(settings, c"psola".as_ptr(), defaults.psola);
             ffi::obs_data_set_default_bool(
                 settings,
                 c"formant_enabled".as_ptr(),
@@ -164,11 +169,7 @@ pub(crate) unsafe extern "C" fn get_defaults(settings: *mut ObsData) {
                 defaults.compressor_makeup_db as f64,
             );
             ffi::obs_data_set_default_bool(settings, c"bypass".as_ptr(), false);
-            ffi::obs_data_set_default_string(
-                settings,
-                c"preset".as_ptr(),
-                c"high-quality-female".as_ptr(),
-            );
+            ffi::obs_data_set_default_string(settings, c"preset".as_ptr(), c"wet-female".as_ptr());
         }
     });
 }
@@ -283,6 +284,11 @@ pub(crate) unsafe extern "C" fn get_properties(data: *mut c_void) -> *mut ObsPro
                 props,
                 c"phase_vocoder".as_ptr(),
                 c"高品質モード（フェーズボコーダ・任意）".as_ptr(),
+            );
+            ffi::obs_properties_add_bool(
+                props,
+                c"psola".as_ptr(),
+                c"PSOLA（wet 再現・試作）".as_ptr(),
             );
 
             let formant = ffi::obs_properties_add_float_slider(
@@ -618,6 +624,7 @@ unsafe extern "C" fn apply_preset(
                 preset.pitch_semitones as f64,
             );
             ffi::obs_data_set_bool(settings, c"phase_vocoder".as_ptr(), preset.phase_vocoder);
+            ffi::obs_data_set_bool(settings, c"psola".as_ptr(), preset.psola);
             ffi::obs_data_set_bool(
                 settings,
                 c"formant_enabled".as_ptr(),
@@ -814,6 +821,7 @@ pub(crate) unsafe fn read_params(settings: *mut ObsData) -> Params {
         pitch_semitones: unsafe { ffi::obs_data_get_double(settings, c"pitch_semitones".as_ptr()) }
             as f32,
         phase_vocoder: unsafe { ffi::obs_data_get_bool(settings, c"phase_vocoder".as_ptr()) },
+        psola: unsafe { ffi::obs_data_get_bool(settings, c"psola".as_ptr()) },
 
         formant_enabled: unsafe { ffi::obs_data_get_bool(settings, c"formant_enabled".as_ptr()) },
         formant_independent: unsafe {

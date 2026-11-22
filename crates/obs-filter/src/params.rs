@@ -21,6 +21,7 @@ pub(crate) struct AtomicParams {
 
     pitch_semitones: AtomicU32,
     phase_vocoder: AtomicBool,
+    psola: AtomicBool,
 
     formant_enabled: AtomicBool,
     formant_independent: AtomicBool,
@@ -52,6 +53,7 @@ impl AtomicParams {
             gate_hold_ms: AtomicU32::new(0),
             pitch_semitones: AtomicU32::new(0),
             phase_vocoder: AtomicBool::new(false),
+            psola: AtomicBool::new(false),
             formant_enabled: AtomicBool::new(false),
             formant_independent: AtomicBool::new(false),
             formant_semitones: AtomicU32::new(0),
@@ -94,6 +96,7 @@ impl AtomicParams {
             .store(params.pitch_semitones.to_bits(), Ordering::Relaxed);
         self.phase_vocoder
             .store(params.phase_vocoder, Ordering::Relaxed);
+        self.psola.store(params.psola, Ordering::Relaxed);
 
         self.formant_enabled
             .store(params.formant_enabled, Ordering::Relaxed);
@@ -139,6 +142,7 @@ impl AtomicParams {
 
             pitch_semitones: f32::from_bits(self.pitch_semitones.load(Ordering::Relaxed)),
             phase_vocoder: self.phase_vocoder.load(Ordering::Relaxed),
+            psola: self.psola.load(Ordering::Relaxed),
 
             formant_enabled: self.formant_enabled.load(Ordering::Relaxed),
             formant_independent: self.formant_independent.load(Ordering::Relaxed),
@@ -179,6 +183,7 @@ mod tests {
             gate_hold_ms: 10.0,
             pitch_semitones: 3.5,
             phase_vocoder: true,
+            psola: true,
             formant_enabled: false,
             formant_independent: true,
             formant_semitones: 2.5,

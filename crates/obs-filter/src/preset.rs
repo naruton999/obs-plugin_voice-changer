@@ -16,6 +16,7 @@ pub(crate) struct Preset {
 
     pub pitch_semitones: f32,
     pub phase_vocoder: bool,
+    pub psola: bool,
 
     pub formant_enabled: bool,
     /// When false, formants follow the pitch shift instead of using
@@ -50,6 +51,7 @@ impl Default for Preset {
             gate_hold_ms: 40.0,
             pitch_semitones: 0.0,
             phase_vocoder: false,
+            psola: false,
             formant_enabled: true,
             formant_independent: true,
             formant_semitones: 0.0,
@@ -122,6 +124,9 @@ pub(crate) fn parse(text: &str) -> Result<Preset, String> {
             }
             "pitch" if key == "phase_vocoder" => {
                 preset.phase_vocoder = value == "true";
+            }
+            "pitch" if key == "psola" => {
+                preset.psola = value == "true";
             }
             "formant" => match key {
                 "enabled" => preset.formant_enabled = value == "true",
@@ -214,6 +219,7 @@ mod tests {
             include_str!("../../../presets/migrated-female.toml"),
             include_str!("../../../presets/standard-female.toml"),
             include_str!("../../../presets/high-quality-female.toml"),
+            include_str!("../../../presets/wet-female.toml"),
             include_str!("../../../presets/natural-female.toml"),
             include_str!("../../../presets/bright-female.toml"),
             include_str!("../../../presets/max-female.toml"),
@@ -234,6 +240,19 @@ mod tests {
         assert_eq!(preset.tone_high_db, 6.0);
         assert!(preset.compressor_enabled);
         assert_eq!(preset.output_gain_db, 2.0);
+    }
+
+    #[test]
+    fn parses_the_wet_preset() {
+        let preset = parse(include_str!("../../../presets/wet-female.toml")).unwrap();
+        assert_eq!(preset.pitch_semitones, 11.0);
+        assert!(!preset.phase_vocoder);
+        assert!(preset.psola);
+        assert!(preset.formant_enabled);
+        assert!(preset.formant_independent);
+        assert_eq!(preset.formant_semitones, 5.0);
+        assert!(!preset.compressor_enabled);
+        assert_eq!(preset.output_gain_db, 1.0);
     }
 
     #[test]
