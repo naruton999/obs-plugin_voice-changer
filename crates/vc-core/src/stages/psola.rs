@@ -122,6 +122,10 @@ pub(crate) struct PsolaPitch {
     out_fifo: VecDeque<f32>,
     fifo_cap: usize,
     latency: usize,
+    /// Previous block energy for transient detection.
+    prev_block_energy: f32,
+    /// Samples remaining before another automatic reset is allowed.
+    reset_cooldown: u32,
 }
 
 impl PsolaPitch {
@@ -164,6 +168,8 @@ impl PsolaPitch {
             out_fifo: VecDeque::with_capacity(fifo_cap),
             fifo_cap,
             latency,
+            prev_block_energy: 0.0,
+            reset_cooldown: 0,
         };
         stage.reset();
         stage
@@ -195,6 +201,8 @@ impl PsolaPitch {
         for _ in 0..self.latency {
             self.out_fifo.push_back(0.0);
         }
+        self.prev_block_energy = 0.0;
+        self.reset_cooldown = 0;
     }
 
     pub(crate) fn latency_samples(&self) -> usize {
@@ -223,12 +231,12 @@ impl PsolaPitch {
             .unwrap_or(0.0)
     }
 
-    fn history_at(&self, position: f32) -> f32 {
+    fn history_at(&self, position: f64) -> f32 {
         if position < 0.0 {
             return 0.0;
         }
         let base = position.floor();
-        let fraction = position - base;
+        let fraction = (position - base) as f32;
         let base = base as u64;
         let first = self.history_get(base);
         let second = self.history_get(base + 1);
@@ -361,9 +369,11 @@ impl PsolaPitch {
     }
 
     fn synthesize(&mut self) {
-        let pitch_ratio = 2f32.powf(self.semitones / 12.0);
-        let formant_ratio = 2f32.powf(self.formant_semitones / 12.0).clamp(0.5, 2.0);
-        let max_grain_half = (self.max_period() / formant_ratio) as f64;
+        let pitch_ratio = 2f64.powf(self.semitones as f64 / 12.0);
+        let formant_ratio = 2f64
+            .powf(self.formant_semitones as f64 / 12.0)
+            .clamp(0.5, 2.0);
+        let max_grain_half = self.max_period() as f64 / formant_ratio;
 
         while self.output_pos + max_grain_half < self.input_len as f64 {
             let Some(f0) = self.smoothed_f0(self.output_pos) else {
@@ -375,7 +385,7 @@ impl PsolaPitch {
             } else {
                 self.max_period() * 0.5
             };
-            let output_period = (input_period / pitch_ratio).max(8.0) as f64;
+            let output_period = (input_period as f64 / pitch_ratio).max(8.0);
 
             while let Some(&front) = self.marks.front() {
                 if (front as f64) < self.output_pos {
@@ -401,16 +411,18 @@ impl PsolaPitch {
                 (None, None) => break,
             };
 
-            let out_len = ((2.0 * input_period) / formant_ratio).round().max(2.0) as usize;
-            let source_span = out_len as f32 * formant_ratio;
-            let source_start = mark as f32 - source_span * 0.5;
-            let dest_start = self.output_pos as f32 - out_len as f32 * 0.5;
+            let out_len = ((2.0 * input_period as f64) / formant_ratio)
+                .round()
+                .max(2.0) as usize;
+            let source_span = out_len as f64 * formant_ratio;
+            let source_start = mark as f64 - source_span * 0.5;
+            let dest_start = self.output_pos - out_len as f64 * 0.5;
             for i in 0..out_len {
-                let source = source_start + i as f32 * formant_ratio;
-                if source < 0.0 || source >= self.input_len as f32 {
+                let source = source_start + i as f64 * formant_ratio;
+                if source < 0.0 || source >= self.input_len as f64 {
                     continue;
                 }
-                let dest = dest_start + i as f32;
+                let dest = dest_start + i as f64;
                 if dest < 0.0 {
                     continue;
                 }
@@ -435,7 +447,52 @@ impl PsolaPitch {
 }
 
 impl PsolaPitch {
+    fn reset_tracking(&mut self) {
+        // Rebuild F0 and pitch marks from the current output position without
+        // clearing the audio FIFO. This breaks a stuck F0/mark state after a
+        // transient while avoiding a full-latency gap.
+        let hop = self.hop() as u64;
+        let frame = (self.output_pos.max(0.0) as u64) / hop;
+        self.f0_base = frame.saturating_sub(2);
+        self.next_f0_frame = self.f0_base;
+        self.f0_raw.clear();
+        self.marks.clear();
+        self.last_mark = None;
+        self.next_mark = self.output_pos;
+    }
+
+    fn maybe_auto_reset(&mut self, buf: &[f32]) {
+        let len = buf.len().max(1);
+        let mut peak = 0.0f32;
+        let mut energy = 0.0f32;
+        for &sample in buf {
+            let value = sample.abs();
+            peak = peak.max(value);
+            energy += sample * sample;
+        }
+        let energy = energy / len as f32;
+        let transient = peak >= 1.0
+            || (self.prev_block_energy > 1e-6
+                && energy > self.prev_block_energy * 32.0
+                && energy > 1e-3);
+        self.prev_block_energy = energy;
+
+        if self.reset_cooldown > 0 {
+            self.reset_cooldown = self.reset_cooldown.saturating_sub(len as u32);
+            return;
+        }
+        if transient {
+            if peak >= 1.0 {
+                self.reset();
+            } else {
+                self.reset_tracking();
+            }
+            self.reset_cooldown = (self.sample_rate * 2.0) as u32;
+        }
+    }
+
     fn process_chunk(&mut self, buf: &mut [f32]) {
+        self.maybe_auto_reset(buf);
         let len = buf.len();
         if self.history.len() + len > self.history_cap {
             let drop = self.history.len() + len - self.history_keep;
@@ -543,5 +600,27 @@ mod tests {
                 .all(|x| *x == 0.0)
         );
         assert_ne!(output[latency..].iter().map(|x| x.abs()).sum::<f32>(), 0.0);
+    }
+
+    #[test]
+    fn loud_transient_recovers() {
+        let sample_rate = 48_000.0;
+        let mut stage = PsolaPitch::new(sample_rate, 2048);
+        stage.set_params(11.0, 5.0);
+        let mut input: Vec<f32> = (0..48_000)
+            .map(|i| 0.1 * (2.0 * PI * 220.0 * i as f32 / sample_rate).sin())
+            .collect();
+        // A clipped burst triggers the full reset path.
+        for sample in &mut input[12_000..12_100] {
+            *sample = 1.0;
+        }
+        // A smaller energy jump triggers the tracking reset path.
+        for sample in &mut input[30_000..30_100] {
+            *sample = 0.8;
+        }
+        let output = process_blocks(&mut stage, &input, 480);
+        assert!(output.iter().all(|x| x.is_finite()));
+        let tail_energy: f32 = output[40_000..].iter().map(|x| x.abs()).sum();
+        assert!(tail_energy > 0.1, "tail energy = {tail_energy}");
     }
 }
