@@ -5,6 +5,7 @@ pub(crate) mod gate;
 pub(crate) mod hpf;
 pub(crate) mod lowpass;
 pub(crate) mod pitch;
+pub(crate) mod psola;
 pub(crate) mod pv_pitch;
 pub(crate) mod soft_clip;
 pub(crate) mod tone;

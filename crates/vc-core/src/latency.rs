@@ -1,4 +1,5 @@
 use crate::params::Params;
+use crate::stages::psola::latency_samples_for;
 
 const PITCH_WINDOW_SECONDS: f64 = 0.040;
 const FORMANT_LATENCY: usize = 1024;
@@ -19,6 +20,10 @@ pub fn estimated_latency_samples(sample_rate: f32, params: &Params) -> usize {
     };
 
     let window = (PITCH_WINDOW_SECONDS * sample_rate as f64).round().max(1.0) as usize;
+
+    if params.psola {
+        return latency_samples_for(sample_rate);
+    }
 
     let formant_target = if params.formant_independent {
         params.formant_semitones.clamp(-12.0, 12.0)
@@ -131,6 +136,25 @@ mod tests {
         assert_eq!(
             estimated_latency_samples(44_100.0, &params),
             PHASE_VOCODER_LATENCY
+        );
+    }
+
+    #[test]
+    fn psola_uses_its_own_latency() {
+        let params = Params {
+            psola: true,
+            pitch_semitones: 11.0,
+            formant_independent: true,
+            formant_semitones: 5.0,
+            ..Params::default()
+        };
+        assert_eq!(
+            estimated_latency_samples(48_000.0, &params),
+            latency_samples_for(48_000.0)
+        );
+        assert_eq!(
+            estimated_latency_samples(44_100.0, &params),
+            latency_samples_for(44_100.0)
         );
     }
 }

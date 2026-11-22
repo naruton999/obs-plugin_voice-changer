@@ -7,6 +7,7 @@ use crate::stages::gain::GainStage;
 use crate::stages::gate::GateStage;
 use crate::stages::hpf::HighPassStage;
 use crate::stages::pitch::PitchStage;
+use crate::stages::psola::PsolaPitch;
 use crate::stages::pv_pitch::PhaseVocoderPitch;
 use crate::stages::soft_clip::SoftClipStage;
 use crate::stages::tone::ToneStage;
@@ -29,7 +30,9 @@ pub struct VoiceChanger {
     gate: GateStage,
     pitch: PitchStage,
     pv_pitch: PhaseVocoderPitch,
+    psola: PsolaPitch,
     phase_vocoder: bool,
+    psola_active: bool,
     formant: FormantStage,
     formant_active: bool,
     tone: ToneStage,
@@ -71,7 +74,9 @@ impl VoiceChanger {
             gate: GateStage::new(sample_rate),
             pitch: PitchStage::new(sample_rate, max_block_size),
             pv_pitch: PhaseVocoderPitch::new(sample_rate, max_block_size),
+            psola: PsolaPitch::new(sample_rate, max_block_size),
             phase_vocoder: false,
+            psola_active: false,
             formant: FormantStage::new(sample_rate, max_block_size),
             formant_active: false,
             tone: ToneStage::new(sample_rate),
@@ -116,10 +121,14 @@ impl VoiceChanger {
 
     /// Current processing latency in samples.
     ///
-    /// The phase vocoder moves pitch and formants in one STFT, so the separate
-    /// formant stage is bypassed and its latency is not added.
+    /// The PSOLA engine shifts formants inside its grains, so it has no
+    /// separate formant stage. The phase vocoder still uses the dedicated
+    /// formant stage.
     #[must_use]
     pub fn latency_samples(&self) -> usize {
+        if self.psola_active {
+            return self.psola.latency_samples();
+        }
         let formant = if self.formant_active {
             self.formant.latency_samples()
         } else {
@@ -171,6 +180,23 @@ impl VoiceChanger {
             params.gate_hold_ms,
         );
         self.pitch.set_semitones(params.pitch_semitones);
+        // PSOLA shifts formants inside its grains, so its formant control is
+        // the desired total shift rather than a pitch-compensated difference.
+        self.psola.set_params(
+            params.pitch_semitones,
+            if params.formant_enabled {
+                params.formant_semitones
+            } else {
+                0.0
+            },
+        );
+        if params.psola != self.psola_active {
+            self.psola_active = params.psola;
+            self.psola.reset();
+            self.pitch.reset();
+            self.pv_pitch.reset();
+            self.formant.reset();
+        }
         // The pitch stage shifts formants along with pitch. The formant stage
         // (or the phase vocoder's integrated envelope warp) receives the
         // difference between the desired total formant shift and the
@@ -191,7 +217,8 @@ impl VoiceChanger {
             self.pv_pitch.reset();
             self.formant.reset();
         }
-        let formant_active = params.formant_enabled && formant_stage.abs() > 1e-6;
+        let formant_active =
+            !self.psola_active && params.formant_enabled && formant_stage.abs() > 1e-6;
         if formant_active != self.formant_active {
             self.formant_active = formant_active;
             self.formant.reset();
@@ -242,7 +269,9 @@ impl VoiceChanger {
         self.input_gain.process(buf);
         self.hpf.process(buf);
         self.gate.process(buf);
-        if self.phase_vocoder {
+        if self.psola_active {
+            self.psola.process(buf);
+        } else if self.phase_vocoder {
             self.pv_pitch.process(buf);
         } else {
             self.pitch.process(buf);
@@ -279,6 +308,7 @@ impl VoiceChanger {
         self.gate.reset();
         self.pitch.reset();
         self.pv_pitch.reset();
+        self.psola.reset();
         self.formant.reset();
         self.tone.reset();
         self.compressor.reset();

@@ -16,6 +16,8 @@ pub struct Params {
 
     pub pitch_semitones: f32,
     pub phase_vocoder: bool,
+    /// Selects the PSOLA pitch engine. Formants are shifted inside the grains.
+    pub psola: bool,
 
     pub formant_enabled: bool,
     pub formant_independent: bool,
@@ -51,6 +53,7 @@ impl Default for Params {
             gate_hold_ms: 40.0,
             pitch_semitones: 0.0,
             phase_vocoder: false,
+            psola: false,
             formant_enabled: true,
             formant_independent: false,
             formant_semitones: 0.0,
@@ -101,6 +104,7 @@ impl Params {
                 12.0,
             ),
             phase_vocoder: self.phase_vocoder,
+            psola: self.psola,
             formant_enabled: self.formant_enabled,
             formant_independent: self.formant_independent,
             formant_semitones: clamp(
@@ -172,6 +176,7 @@ mod tests {
         assert_eq!(p.gate_hold_ms, 40.0);
         assert_eq!(p.pitch_semitones, 0.0);
         assert!(!p.phase_vocoder);
+        assert!(!p.psola);
         assert!(p.formant_enabled);
         assert!(!p.formant_independent);
         assert!(!p.bypass);

@@ -75,6 +75,7 @@ fn params_from_args(args: &[String]) -> Params {
     Params {
         pitch_semitones: value(args, "--pitch", 0.0),
         phase_vocoder: args.iter().any(|arg| arg == "--pv"),
+        psola: args.iter().any(|arg| arg == "--psola"),
         formant_enabled: !args.iter().any(|arg| arg == "--formant-off"),
         formant_independent,
         formant_semitones: value(args, "--formant", 0.0),
